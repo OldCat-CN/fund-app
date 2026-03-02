@@ -189,6 +189,7 @@ function onTabChange(index: number) {
   --bottom-navigation-border-color: var(--border-color);
   --bottom-navigation-item-active-color: var(--color-primary);
   --bottom-navigation-item-inactive-color: var(--text-secondary);
+  --bottom-navigation-item-active-background-color: var(--bg-tertiary);
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary) !important;
 }
@@ -199,6 +200,10 @@ function onTabChange(index: number) {
 
 :deep(.var-bottom-navigation-item--active) {
   color: var(--color-primary);
+}
+
+:deep(.var-bottom-navigation-item--active .var-bottom-navigation-item__icon-container) {
+  background: var(--bg-tertiary);
 }
 
 :deep(.var-bottom-navigation-item__label) {

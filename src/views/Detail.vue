@@ -298,18 +298,15 @@ const priceChangePercent = computed(() => {
 
 const isUp = computed(() => priceChangePercent.value >= 0)
 
-// [WHAT] 最佳可用周期收益（优先1年，其次6月、3月、1月）
-const bestPeriodReturn = computed(() => {
-  const priorities = ['1y', '6m', '3m', '1m']
-  for (const period of priorities) {
-    const item = periodReturns.value.find(p => p.period === period)
-    if (item && item.fundReturn !== 0) {
-      const labels: Record<string, string> = { '1y': '近1年', '6m': '近6月', '3m': '近3月', '1m': '近1月' }
-      return { label: labels[period] || period, value: item.fundReturn }
-    }
-  }
-  return { label: '近1年', value: 0 }
-})
+function getPeriodFundReturn(period: string): number | null {
+  const item = periodReturns.value.find(p => p.period === period)
+  if (!item) return null
+  return Number.isFinite(item.fundReturn) ? item.fundReturn : null
+}
+
+const monthReturn = computed(() => getPeriodFundReturn('1m'))
+const quarterReturn = computed(() => getPeriodFundReturn('3m'))
+const yearReturn = computed(() => getPeriodFundReturn('1y'))
 
 
 // [WHAT] 加载趋势预测
@@ -668,9 +665,21 @@ function formatPercent(num: number): string {
             <div class="metric-value">{{ fundInfo?.dwjz || '--' }}</div>
           </div>
           <div class="metric-item">
-            <div class="metric-label">{{ bestPeriodReturn.label }}</div>
-            <div class="metric-value" :class="bestPeriodReturn.value >= 0 ? 'up' : 'down'">
-              {{ bestPeriodReturn.value !== 0 ? formatPercent(bestPeriodReturn.value) : '--' }}
+            <div class="metric-label">近1月涨跌幅</div>
+            <div class="metric-value" :class="(monthReturn ?? 0) >= 0 ? 'up' : 'down'">
+              {{ monthReturn !== null ? formatPercent(monthReturn) : '--' }}
+            </div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">近3月涨跌幅</div>
+            <div class="metric-value" :class="(quarterReturn ?? 0) >= 0 ? 'up' : 'down'">
+              {{ quarterReturn !== null ? formatPercent(quarterReturn) : '--' }}
+            </div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">近1年涨跌幅</div>
+            <div class="metric-value" :class="(yearReturn ?? 0) >= 0 ? 'up' : 'down'">
+              {{ yearReturn !== null ? formatPercent(yearReturn) : '--' }}
             </div>
           </div>
         </div>
@@ -1523,33 +1532,37 @@ function formatPercent(num: number): string {
 }
 
 .sub-metrics {
-  display: flex;
-  gap: 40px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.metric-item {
+.sub-metrics .metric-item {
   display: flex;
   flex-direction: column;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 8px 10px;
   gap: 4px;
 }
 
-.metric-label {
+.sub-metrics .metric-label {
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.metric-value {
-  font-size: 18px;
+.sub-metrics .metric-value {
+  font-size: 16px;
   font-weight: 600;
   font-family: 'DIN Alternate', -apple-system, monospace;
   color: var(--text-primary);
 }
 
-.metric-value.up {
+.sub-metrics .metric-value.up {
   color: #f56c6c;
 }
 
-.metric-value.down {
+.sub-metrics .metric-value.down {
   color: #67c23a;
 }
 

@@ -38,6 +38,8 @@ const periodReturns = ref<PeriodReturn[]>([])
 const isLoading = ref(false)
 const activePeriod = ref('5d') // 默认显示5日K线
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const chartMode = ref<'net' | 'change'>('net')
+const hoveredIndex = ref<number | null>(null)
 
 // [WHAT] 分时数据
 interface IntradayPoint {
@@ -65,6 +67,8 @@ const isIntradayMode = computed(() => activePeriod.value === '1d')
 // [WHAT] 只有当日模式且有实时数据时才显示分时图样式
 // [WHY] 当日模式显示昨日数据 + 今日估值
 const showIntradayChart = computed(() => isIntradayMode.value)
+
+const showChangeMode = computed(() => chartMode.value === 'change')
 
 // [WHAT] 过滤数据
 const filteredData = computed(() => {
@@ -247,6 +251,54 @@ async function loadData() {
   }
 }
 
+function getChartPadding() {
+  return { top: 15, right: 16, bottom: 25, left: 58 }
+}
+
+function updateHoverByClientX(clientX: number) {
+  const canvas = canvasRef.value
+  const data = filteredData.value
+  if (!canvas || data.length === 0) return
+
+  const rect = canvas.getBoundingClientRect()
+  const padding = getChartPadding()
+  const chartWidth = rect.width - padding.left - padding.right
+  if (chartWidth <= 0) return
+
+  const relativeX = clientX - rect.left
+  const clampedX = Math.max(padding.left, Math.min(rect.width - padding.right, relativeX))
+  const ratio = (clampedX - padding.left) / chartWidth
+  const idx = Math.round(ratio * Math.max(data.length - 1, 1))
+  hoveredIndex.value = Math.max(0, Math.min(data.length - 1, idx))
+}
+
+function handleMouseMove(event: MouseEvent) {
+  updateHoverByClientX(event.clientX)
+}
+
+function handleTouchMove(event: TouchEvent) {
+  const touch = event.touches[0]
+  if (!touch) return
+  updateHoverByClientX(touch.clientX)
+}
+
+function clearHover() {
+  hoveredIndex.value = null
+}
+
+function formatHoverTimeLabel(time: string): string {
+  if (!time) return '--'
+  const datePart = time.split(' ')[0] || time
+  const parts = datePart.split('-')
+  if (parts.length >= 3) return `${parts[1]}-${parts[2]}`
+  return datePart
+}
+
+function toggleChartMode() {
+  chartMode.value = chartMode.value === 'net' ? 'change' : 'net'
+  nextTick(drawChart)
+}
+
 
 // ========== Canvas绘图（专业风格） ==========
 function drawChart() {
@@ -287,7 +339,7 @@ function drawChart() {
   volumeHeight = 0
   volumeTop = height
   
-  const padding = { top: 15, right: 60, bottom: 25, left: 55 }
+  const padding = getChartPadding()
   const chartWidth = width - padding.left - padding.right
   
   // [WHY] 获取当前主题颜色
@@ -297,10 +349,16 @@ function drawChart() {
   ctx.fillStyle = colors.bgPrimary
   ctx.fillRect(0, 0, width, height)
   
+  const baseForChange = data[0]?.value || props.lastClose || 1
+  const displayValues = data.map(d => {
+    if (!showChangeMode.value) return d.value
+    if (!baseForChange) return 0
+    return ((d.value - baseForChange) / baseForChange) * 100
+  })
+
   // 计算价格范围
-  const values = data.map(d => d.value)
-  let minValue = Math.min(...values)
-  let maxValue = Math.max(...values)
+  let minValue = Math.min(...displayValues)
+  let maxValue = Math.max(...displayValues)
   
   // [WHY] 价格范围增加边距，让曲线不贴边
   const margin = (maxValue - minValue) * 0.1 || 0.01
@@ -326,15 +384,18 @@ function drawChart() {
     ctx.stroke()
   }
   
-  // ========== 绘制Y轴刻度（右侧） ==========
+  // ========== 绘制Y轴刻度（左侧） ==========
   ctx.fillStyle = colors.textSecondary
   ctx.font = '10px Arial'
-  ctx.textAlign = 'left'
+  ctx.textAlign = 'right'
   
   for (let i = 0; i <= 4; i++) {
     const value = maxValue - valueRange * i / 4
     const y = padding.top + (mainHeight - padding.top) * i / 4
-    ctx.fillText(value.toFixed(4), width - padding.right + 5, y + 3)
+    const label = showChangeMode.value
+      ? `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+      : value.toFixed(4)
+    ctx.fillText(label, padding.left - 6, y + 3)
   }
   
   // ========== 绘制价格线/K线 ==========
@@ -346,8 +407,8 @@ function drawChart() {
   
   // [WHY] 计算整体涨跌
   const chartBottom = mainHeight
-  const firstValue = data[0]?.value || 0
-  const lastValue = data[data.length - 1]?.value || 0
+  const firstValue = displayValues[0] ?? 0
+  const lastValue = displayValues[displayValues.length - 1] ?? 0
   const isOverallUp = lastValue >= firstValue
   
   // [WHAT] 获取今日日期
@@ -365,8 +426,9 @@ function drawChart() {
     ctx.beginPath()
     ctx.setLineDash([4, 4])
     data.forEach((point, i) => {
+      const displayValue = displayValues[i] ?? 0
       const x = padding.left + (chartWidth / Math.max(data.length - 1, 1)) * i
-      const y = padding.top + (mainHeight - padding.top) * (1 - (point.value - minValue) / valueRange)
+      const y = padding.top + (mainHeight - padding.top) * (1 - (displayValue - minValue) / valueRange)
       if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     })
@@ -377,8 +439,9 @@ function drawChart() {
     
     // [WHAT] 绘制历史数据点
     data.forEach((point, i) => {
+      const displayValue = displayValues[i] ?? 0
       const x = padding.left + (chartWidth / Math.max(data.length - 1, 1)) * i
-      const y = padding.top + (mainHeight - padding.top) * (1 - (point.value - minValue) / valueRange)
+      const y = padding.top + (mainHeight - padding.top) * (1 - (displayValue - minValue) / valueRange)
       ctx.beginPath()
       ctx.arc(x, y, 3, 0, Math.PI * 2)
       ctx.fillStyle = colors.textSecondary
@@ -388,13 +451,14 @@ function drawChart() {
     // [WHAT] 在最后一个点右侧显示"等待开盘"
     const lastPoint = data[data.length - 1]!
     const lastX = padding.left + chartWidth
-    const lastY = padding.top + (mainHeight - padding.top) * (1 - (lastPoint.value - minValue) / valueRange)
+    const lastDisplayValue = displayValues[data.length - 1] ?? 0
+    const lastY = padding.top + (mainHeight - padding.top) * (1 - (lastDisplayValue - minValue) / valueRange)
     
     // 绘制虚线延伸到右侧
     ctx.beginPath()
     ctx.setLineDash([4, 4])
     const prevX = padding.left + (chartWidth / Math.max(data.length - 1, 1)) * (data.length - 1)
-    const prevY = padding.top + (mainHeight - padding.top) * (1 - (lastPoint.value - minValue) / valueRange)
+    const prevY = lastY
     ctx.moveTo(prevX, prevY)
     ctx.lineTo(lastX, lastY)
     ctx.strokeStyle = colors.textSecondary
@@ -425,7 +489,7 @@ function drawChart() {
     
     const fillPoints: { x: number, y: number }[] = data.map((point, i) => ({
       x: padding.left + (chartWidth / Math.max(data.length - 1, 1)) * i,
-      y: padding.top + (mainHeight - padding.top) * (1 - (point.value - minValue) / valueRange)
+      y: padding.top + (mainHeight - padding.top) * (1 - ((displayValues[i] ?? 0) - minValue) / valueRange)
     }))
     
     if (fillPoints.length > 0) {
@@ -478,7 +542,7 @@ function drawChart() {
     ctx.beginPath()
     const points: { x: number, y: number }[] = data.map((point, i) => ({
       x: padding.left + (chartWidth / Math.max(data.length - 1, 1)) * i,
-      y: padding.top + (mainHeight - padding.top) * (1 - (point.value - minValue) / valueRange)
+      y: padding.top + (mainHeight - padding.top) * (1 - ((displayValues[i] ?? 0) - minValue) / valueRange)
     }))
     
     if (points.length > 0) {
@@ -517,7 +581,8 @@ function drawChart() {
     if (data.length > 0) {
       const lastPoint = data[data.length - 1]!
       const lastPointX = padding.left + chartWidth
-      const lastPointY = padding.top + (mainHeight - padding.top) * (1 - (lastPoint.value - minValue) / valueRange)
+      const lastDisplayValue = displayValues[displayValues.length - 1] ?? 0
+      const lastPointY = padding.top + (mainHeight - padding.top) * (1 - (lastDisplayValue - minValue) / valueRange)
       
       // [WHAT] 绘制脉冲动画点
       const pulseSize = 3 + Math.sin(Date.now() / 200) * 1.5
@@ -535,7 +600,9 @@ function drawChart() {
       ctx.globalAlpha = 1
       
       // [WHAT] 在最新点旁边显示精确数值（带背景框避免与Y轴刻度重叠）
-      const priceText = lastPoint.value.toFixed(4)
+      const priceText = showChangeMode.value
+        ? `${lastDisplayValue >= 0 ? '+' : ''}${lastDisplayValue.toFixed(2)}%`
+        : lastPoint.value.toFixed(4)
       ctx.font = 'bold 11px Arial'
       
       // [WHY] 根据点位置决定标签显示在上方还是下方，并加背景框
@@ -565,6 +632,60 @@ function drawChart() {
       ctx.textAlign = 'left'
       ctx.fillText(priceText, labelX, labelY)
     }
+  }
+
+  // ========== 触摸/鼠标十字线 ==========
+  if (hoveredIndex.value !== null && data[hoveredIndex.value]) {
+    const idx = hoveredIndex.value
+    const point = data[idx]!
+    const displayValue = displayValues[idx] ?? 0
+    const x = padding.left + (chartWidth / Math.max(data.length - 1, 1)) * idx
+    const y = padding.top + (mainHeight - padding.top) * (1 - (displayValue - minValue) / valueRange)
+
+    ctx.save()
+    ctx.setLineDash([4, 4])
+    ctx.strokeStyle = colors.textSecondary
+    ctx.lineWidth = 1
+
+    ctx.beginPath()
+    ctx.moveTo(x, padding.top)
+    ctx.lineTo(x, mainHeight)
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.moveTo(padding.left, y)
+    ctx.lineTo(width - padding.right, y)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    ctx.beginPath()
+    ctx.arc(x, y, 3.5, 0, Math.PI * 2)
+    ctx.fillStyle = currentChange.value >= 0 ? upColor : downColor
+    ctx.fill()
+
+    const valueText = showChangeMode.value
+      ? `${displayValue >= 0 ? '+' : ''}${displayValue.toFixed(2)}%`
+      : point.value.toFixed(4)
+    const timeText = formatHoverTimeLabel(point.time)
+    const tooltipText = `${timeText}  ${valueText}`
+
+    ctx.font = '11px Arial'
+    const textWidth = ctx.measureText(tooltipText).width
+    const boxWidth = textWidth + 12
+    const boxHeight = 20
+    const boxX = Math.min(Math.max(8, x - boxWidth / 2), width - boxWidth - 8)
+    const boxY = 6
+
+    ctx.fillStyle = themeStore.actualTheme === 'dark'
+      ? 'rgba(22, 27, 34, 0.92)'
+      : 'rgba(31, 35, 40, 0.86)'
+    ctx.beginPath()
+    ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 4)
+    ctx.fill()
+    ctx.fillStyle = '#ffffff'
+    ctx.textAlign = 'left'
+    ctx.fillText(tooltipText, boxX + 6, boxY + 13.5)
+    ctx.restore()
   }
   
   // ========== 绘制X轴时间标签 ==========
@@ -623,6 +744,7 @@ function formatVolume(v: number): string {
 function selectPeriod(key: string) {
   // [WHY] 先停止动画，避免旧数据干扰
   stopAnimation()
+  hoveredIndex.value = null
   
   // [WHY] 当日模式重置分时数据并添加当前点
   if (key === '1d') {
@@ -697,6 +819,10 @@ watch(activePeriod, () => {
   nextTick(drawChart)
 })
 
+watch(chartMode, () => {
+  nextTick(drawChart)
+})
+
 // [WHY] 监控主题变化，重绘图表
 watch(() => themeStore.actualTheme, () => {
   nextTick(drawChart)
@@ -740,6 +866,14 @@ onUnmounted(() => {
       <div class="period-tools">
         <span class="tool-label">实时</span>
         <span class="live-dot"></span>
+        <button
+          class="mode-toggle"
+          :class="{ active: showChangeMode }"
+          @click.stop="toggleChartMode"
+        >
+          <span class="mode-toggle-label">{{ showChangeMode ? '涨跌幅' : '净值' }}</span>
+          <span class="mode-toggle-thumb"></span>
+        </button>
       </div>
     </div>
 
@@ -776,7 +910,16 @@ onUnmounted(() => {
       <div v-if="isLoading" class="chart-loading">
         <van-loading size="24px" color="#0ecb81">加载中...</van-loading>
       </div>
-      <canvas v-else ref="canvasRef" class="chart-canvas"></canvas>
+      <canvas
+        v-else
+        ref="canvasRef"
+        class="chart-canvas"
+        @mousemove="handleMouseMove"
+        @mouseleave="clearHover"
+        @touchstart.prevent="handleTouchMove"
+        @touchmove.prevent="handleTouchMove"
+        @touchend="clearHover"
+      ></canvas>
     </div>
 
     <!-- 成交量标签 -->
@@ -856,7 +999,7 @@ onUnmounted(() => {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -874,6 +1017,44 @@ onUnmounted(() => {
   background: var(--color-down);
   border-radius: 50%;
   animation: pulse 1.5s infinite;
+}
+
+.mode-toggle {
+  height: 26px;
+  min-width: 92px;
+  border: 1px solid var(--border-color);
+  border-radius: 13px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.mode-toggle-label {
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mode-toggle-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.mode-toggle.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
+.mode-toggle.active .mode-toggle-thumb {
+  background: var(--color-primary);
 }
 
 @keyframes pulse {
@@ -935,6 +1116,7 @@ onUnmounted(() => {
   height: 100%;
   /* [WHY] 防止Canvas模糊 */
   image-rendering: -webkit-optimize-contrast;
+  touch-action: none;
 }
 
 .chart-loading {
