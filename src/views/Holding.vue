@@ -4,7 +4,7 @@
 // [WHAT] 支持 A类/C类基金费用计算
 
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useHoldingStore } from '@/stores/holding'
 import { searchFund, fetchFundEstimate, detectShareClass, fetchFundFeeInfo, calculateBuyFee, calculateDailyServiceFee } from '@/api/fund'
 import { showConfirmDialog, showToast, showLoadingToast, closeToast } from 'vant'
@@ -13,6 +13,7 @@ import type { FundInfo, HoldingRecord, FundShareClass, FundFeeInfo } from '@/typ
 import ScreenshotImport from '@/components/ScreenshotImport.vue'
 
 const router = useRouter()
+const route = useRoute()
 const holdingStore = useHoldingStore()
 const SHOW_DETAIL_KEY = 'holding_show_detail'
 
@@ -83,6 +84,8 @@ onMounted(() => {
     showDetail.value = true
   }
   holdingStore.initHoldings()
+  // [WHAT] 支持从详情页携带参数直接打开交易入口
+  handleRouteActions()
 })
 
 // [WHAT] 汇总统计样式
@@ -406,6 +409,27 @@ function openTradeHistoryDialog(code: string) {
   historyFundCode.value = code
   historyFundName.value = holding.name
   showTradeHistoryDialog.value = true
+}
+
+function handleRouteActions() {
+  const code = typeof route.query.code === 'string' ? route.query.code : ''
+  const trade = typeof route.query.trade === 'string' ? route.query.trade : ''
+  const showHistory = route.query.showHistory === '1'
+  if (!code) return
+
+  if (!holdingStore.getHoldingByCode(code)) {
+    showToast('该基金不在持仓中')
+    router.replace({ path: '/holding' })
+    return
+  }
+
+  if (trade === 'buy' || trade === 'sell') {
+    openTradeDialog(trade, code)
+  } else if (showHistory) {
+    openTradeHistoryDialog(code)
+  }
+
+  router.replace({ path: '/holding' })
 }
 
 // [WHAT] 提交买入/卖出

@@ -75,6 +75,7 @@ const holdingExpanded = ref(true)
 
 // ========== 调整成本弹窗 ==========
 const showCostDialog = ref(false)
+const showMoreActions = ref(false)
 const costFormData = ref({
   code: '',
   name: '',
@@ -431,7 +432,13 @@ function setReminder() {
 }
 
 function showTransactions() {
-  router.push(`/trades/${fundCode.value}`)
+  router.push({
+    path: '/holding',
+    query: {
+      code: fundCode.value,
+      showHistory: '1'
+    }
+  })
 }
 
 async function removeFromWatchlist() {
@@ -462,8 +469,24 @@ async function addToWatchlist() {
 }
 
 function showMore() {
-  showToast('更多功能开发中')
+  showMoreActions.value = true
 }
+
+function handleMoreAction(action: 'buy' | 'sell') {
+  showMoreActions.value = false
+  router.push({
+    path: '/holding',
+    query: {
+      code: fundCode.value,
+      trade: action
+    }
+  })
+}
+
+const moreActionOptions = [
+  { name: '买入', key: 'buy' },
+  { name: '卖出', key: 'sell' }
+] as const
 
 // [WHAT] 跳转同类基金
 function goToSimilarFund(code: string) {
@@ -551,13 +574,11 @@ function formatPercent(num: number): string {
       <!-- 导航栏 -->
       <div class="nav-bar">
         <van-icon name="arrow-left" size="22" color="var(--text-primary)" @click="goBack" />
-        <van-icon name="arrow-left" size="18" color="var(--text-secondary)" @click="goPrevFund" />
         <div class="nav-title">
           <div class="fund-name">{{ fundInfo?.name || '加载中...' }}</div>
           <div class="fund-code">{{ fundCode }}</div>
         </div>
-        <van-icon name="arrow" size="18" color="var(--text-secondary)" @click="goNextFund" />
-        <van-icon name="search" size="22" color="var(--text-primary)" @click="goToSearch" />
+        <div class="nav-spacer"></div>
       </div>
       
       <!-- 核心指标 -->
@@ -1181,6 +1202,15 @@ function formatPercent(num: number): string {
       </div>
     </div>
 
+    <!-- 更多操作 -->
+    <van-action-sheet
+      v-model:show="showMoreActions"
+      :actions="moreActionOptions.map(item => ({ name: item.name }))"
+      cancel-text="取消"
+      close-on-click-action
+      @select="(action: { name: string }) => handleMoreAction(action.name === '卖出' ? 'sell' : 'buy')"
+    />
+
     <!-- 调整成本弹窗 -->
     <van-popup
       v-model:show="showCostDialog"
@@ -1261,6 +1291,12 @@ function formatPercent(num: number): string {
   min-width: 0;
   text-align: center;
   overflow: hidden;
+}
+
+.nav-spacer {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
 }
 
 .fund-name {
