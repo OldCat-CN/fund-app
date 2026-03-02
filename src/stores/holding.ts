@@ -23,7 +23,9 @@ interface PendingTrade {
   name: string
   type: HoldingTradeType
   date: string
-  time: string
+  period?: 'before_15' | 'after_15'
+  // [兼容] 历史版本使用具体时间字段
+  time?: string
   amount?: number
   shares?: number
   createdAt: number
@@ -303,14 +305,19 @@ export const useHoldingStore = defineStore('holding', () => {
     return new Date().toISOString().split('T')[0] || ''
   }
 
-  function toTimeValue(date: string, time: string): number {
-    const hhmm = /^\d{2}:\d{2}$/.test(time) ? time : '00:00'
+  function toTimeValue(date: string, period?: 'before_15' | 'after_15', time?: string): number {
+    const hhmm =
+      period === 'after_15'
+        ? '15:01'
+        : period === 'before_15'
+          ? '14:59'
+          : /^\d{2}:\d{2}$/.test(time || '') ? (time as string) : '00:00'
     return new Date(`${date}T${hhmm}:00`).getTime()
   }
 
   function sortPendingTrades(list: PendingTrade[]): PendingTrade[] {
     return [...list].sort((a, b) => {
-      return toTimeValue(a.date, a.time) - toTimeValue(b.date, b.time) || a.createdAt - b.createdAt
+      return toTimeValue(a.date, a.period, a.time) - toTimeValue(b.date, b.period, b.time) || a.createdAt - b.createdAt
     })
   }
 
@@ -431,12 +438,12 @@ export const useHoldingStore = defineStore('holding', () => {
     code: string
     amount: number
     date: string
-    time: string
+    period: 'before_15' | 'after_15'
   }): Promise<{ pending: boolean }> {
     const code = params.code
     const amount = params.amount
     const date = normalizeDate(params.date)
-    const time = params.time
+    const period = params.period
 
     if (!code) throw new Error('基金代码不能为空')
     if (!amount || amount <= 0) throw new Error('买入金额必须大于0')
@@ -457,7 +464,7 @@ export const useHoldingStore = defineStore('holding', () => {
         name: holding.name,
         type: 'buy',
         date,
-        time,
+        period,
         amount
       })
       return { pending: true }
@@ -474,12 +481,12 @@ export const useHoldingStore = defineStore('holding', () => {
     code: string
     shares: number
     date: string
-    time: string
+    period: 'before_15' | 'after_15'
   }): Promise<{ pending: boolean }> {
     const code = params.code
     const shares = params.shares
     const date = normalizeDate(params.date)
-    const time = params.time
+    const period = params.period
 
     if (!code) throw new Error('基金代码不能为空')
     if (!shares || shares <= 0) throw new Error('卖出份额必须大于0')
@@ -508,7 +515,7 @@ export const useHoldingStore = defineStore('holding', () => {
         name: holding.name,
         type: 'sell',
         date,
-        time,
+        period,
         shares
       })
       return { pending: true }

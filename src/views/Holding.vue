@@ -63,8 +63,9 @@ const tradeFormData = ref({
   amount: '',
   shares: '',
   date: '',
-  time: ''
+  period: 'before_15' as 'before_15' | 'after_15'
 })
+const todayDate = new Date().toISOString().split('T')[0] || ''
 
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
@@ -363,11 +364,6 @@ function goToDetail(code: string) {
   router.push(`/detail/${code}`)
 }
 
-function getNowTime(): string {
-  const now = new Date()
-  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-}
-
 // [WHAT] 打开买入/卖出弹窗
 function openTradeDialog(type: 'buy' | 'sell', code: string) {
   const holding = holdingStore.getHoldingByCode(code)
@@ -380,7 +376,7 @@ function openTradeDialog(type: 'buy' | 'sell', code: string) {
     amount: '',
     shares: '',
     date: new Date().toISOString().split('T')[0] || '',
-    time: getNowTime()
+    period: 'before_15'
   }
   showTradeDialog.value = true
 }
@@ -391,8 +387,12 @@ async function submitTrade() {
     showToast('请选择交易日期')
     return
   }
-  if (!tradeFormData.value.time) {
-    showToast('请选择交易时间')
+  if (tradeFormData.value.date > todayDate) {
+    showToast('不支持今天之后的交易日期')
+    return
+  }
+  if (!tradeFormData.value.period) {
+    showToast('请选择交易时段')
     return
   }
 
@@ -408,7 +408,7 @@ async function submitTrade() {
         code: tradeFormData.value.code,
         amount,
         date: tradeFormData.value.date,
-        time: tradeFormData.value.time
+        period: tradeFormData.value.period
       })
 
       if (result.pending) {
@@ -427,7 +427,7 @@ async function submitTrade() {
         code: tradeFormData.value.code,
         shares,
         date: tradeFormData.value.date,
-        time: tradeFormData.value.time
+        period: tradeFormData.value.period
       })
 
       if (result.pending) {
@@ -604,7 +604,14 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
           />
 
           <van-field v-model="tradeFormData.date" type="date" label="交易日期" />
-          <van-field v-model="tradeFormData.time" type="time" label="交易时间" />
+          <van-field label="交易时段">
+            <template #input>
+              <van-radio-group v-model="tradeFormData.period" direction="horizontal">
+                <van-radio name="before_15">15:00前</van-radio>
+                <van-radio name="after_15">15:00后</van-radio>
+              </van-radio-group>
+            </template>
+          </van-field>
 
           <div class="fee-tip">
             <van-icon name="info-o" />
