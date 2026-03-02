@@ -71,10 +71,10 @@ onUnmounted(() => {
 
 // [WHAT] Tab配置
 const tabs = [
-  { name: 'holding', label: '持仓', icon: 'format-list-bulleted', route: '/holding' },
-  { name: 'market', label: '行情', icon: 'chart-line', route: '/market' },
+  { name: 'holding', label: '持仓', icon: 'account_balance_wallet', route: '/holding' },
+  { name: 'market', label: '行情', icon: 'show_chart', route: '/market' },
   { name: 'home', label: '自选', icon: 'home', route: '/' },
-  { name: 'analysis', label: '分析', icon: 'chart-bar', route: '/analysis' },
+  { name: 'analysis', label: '分析', icon: 'insights', route: '/analysis' },
   { name: 'announcement', label: '公告', icon: 'bell', route: '/announcement' }
 ]
 

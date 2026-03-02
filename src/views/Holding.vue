@@ -539,7 +539,7 @@ function displayMoney(value: number | string | undefined): string {
         <div class="summary-item">
           <div class="summary-label">收益率</div>
           <div class="summary-value" :class="summaryProfitClass">
-            {{ showDetail ? formatPercent(holdingStore.summary.totalProfitRate) : '*****' }}
+            {{ formatPercent(holdingStore.summary.totalProfitRate) }}
           </div>
         </div>
       </div>
@@ -582,7 +582,7 @@ function displayMoney(value: number | string | undefined): string {
               </div>
             </div>
             <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
-              {{ showDetail ? formatPercent(holding.todayChange || 0) : '*****' }}
+              {{ formatPercent(holding.todayChange || 0) }}
             </div>
             <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
               {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
@@ -592,7 +592,7 @@ function displayMoney(value: number | string | undefined): string {
                 {{ showDetail ? (holding.profit !== undefined ? (holding.profit >= 0 ? '+' : '') + formatMoney(holding.profit) : '--') : '*****' }}
               </div>
               <div class="profit-rate">
-                {{ showDetail ? (holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--') : '*****' }}
+                {{ holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--' }}
               </div>
             </div>
           </div>
@@ -730,7 +730,7 @@ function displayMoney(value: number | string | undefined): string {
                   {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
                 </div>
                 <div class="history-rate" :class="getChangeStatus(item.profit)">
-                  {{ showDetail ? formatPercent(item.profitRate) : '*****' }}
+                  {{ formatPercent(item.profitRate) }}
                 </div>
               </div>
             </div>
