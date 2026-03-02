@@ -14,6 +14,7 @@ import ScreenshotImport from '@/components/ScreenshotImport.vue'
 
 const router = useRouter()
 const holdingStore = useHoldingStore()
+const SHOW_DETAIL_KEY = 'holding_show_detail'
 
 // ========== 表单相关 ==========
 const showAddDialog = ref(false)
@@ -71,9 +72,16 @@ const todayDate = new Date().toISOString().split('T')[0] || ''
 const showTradeHistoryDialog = ref(false)
 const historyFundCode = ref('')
 const historyFundName = ref('')
+const showDetail = ref(true)
 
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
+  try {
+    const raw = localStorage.getItem(SHOW_DETAIL_KEY)
+    showDetail.value = raw !== '0'
+  } catch {
+    showDetail.value = true
+  }
   holdingStore.initHoldings()
 })
 
@@ -482,6 +490,16 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
 function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   return period === 'after_15' ? '15:00后' : '15:00前'
 }
+
+function toggleDetail() {
+  showDetail.value = !showDetail.value
+  localStorage.setItem(SHOW_DETAIL_KEY, showDetail.value ? '1' : '0')
+}
+
+function displayMoney(value: number | string | undefined): string {
+  if (!showDetail.value) return '*****'
+  return formatMoney(value || 0)
+}
 </script>
 
 <template>
@@ -490,6 +508,7 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
     <van-nav-bar title="我的持仓" safe-area-inset-top>
       <template #right>
         <div class="nav-actions">
+          <van-icon :name="showDetail ? 'eye-o' : 'closed-eye'" size="20" @click="toggleDetail" />
           <van-icon name="photo-o" size="20" @click="showImportDialog = true" />
           <van-icon name="add-o" size="20" @click="openAddDialog" />
         </div>
@@ -501,12 +520,12 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
       <div class="summary-row">
         <div class="summary-item">
           <div class="summary-label">账户资产</div>
-          <div class="summary-value">{{ formatMoney(holdingStore.summary.totalValue) }}</div>
+          <div class="summary-value">{{ displayMoney(holdingStore.summary.totalValue) }}</div>
         </div>
         <div class="summary-item">
           <div class="summary-label">当日收益</div>
           <div class="summary-value" :class="summaryTodayClass">
-            {{ holdingStore.summary.todayProfit >= 0 ? '+' : '' }}{{ formatMoney(holdingStore.summary.todayProfit) }}
+            {{ showDetail ? (holdingStore.summary.todayProfit >= 0 ? '+' : '') + formatMoney(holdingStore.summary.todayProfit) : '*****' }}
           </div>
         </div>
       </div>
@@ -514,13 +533,13 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
         <div class="summary-item">
           <div class="summary-label">持仓盈亏</div>
           <div class="summary-value" :class="summaryProfitClass">
-            {{ holdingStore.summary.totalProfit >= 0 ? '+' : '' }}{{ formatMoney(holdingStore.summary.totalProfit) }}
+            {{ showDetail ? (holdingStore.summary.totalProfit >= 0 ? '+' : '') + formatMoney(holdingStore.summary.totalProfit) : '*****' }}
           </div>
         </div>
         <div class="summary-item">
           <div class="summary-label">收益率</div>
           <div class="summary-value" :class="summaryProfitClass">
-            {{ formatPercent(holdingStore.summary.totalProfitRate) }}
+            {{ showDetail ? formatPercent(holdingStore.summary.totalProfitRate) : '*****' }}
           </div>
         </div>
       </div>
@@ -548,12 +567,13 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
           <div class="holding-item" @click="goToDetail(holding.code)">
             <div class="col-name">
               <div class="fund-name">{{ holding.name || '加载中...' }}</div>
+              <div class="fund-code">{{ holding.code }}</div>
               <div class="fund-meta">
                 <!-- [FIX] #49, #46 根据实际状态显示更新标识 -->
                 <span v-if="holding.loading" class="tag loading">加载中</span>
                 <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">已更新</span>
                 <span v-else class="tag pending">待更新</span>
-                <span class="amount">市值 ¥{{ formatMoney(holding.marketValue || holding.amount) }}</span>
+                <span class="amount">市值 ¥{{ displayMoney(holding.marketValue || holding.amount) }}</span>
               </div>
               <div class="trade-actions" @click.stop>
                 <van-button size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
@@ -562,17 +582,17 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
               </div>
             </div>
             <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
-              {{ formatPercent(holding.todayChange || 0) }}
+              {{ showDetail ? formatPercent(holding.todayChange || 0) : '*****' }}
             </div>
             <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
-              {{ holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--' }}
+              {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
             </div>
             <div class="col-profit" :class="getChangeStatus(holding.profit || 0)">
               <div class="profit-amount">
-                {{ holding.profit !== undefined ? (holding.profit >= 0 ? '+' : '') + formatMoney(holding.profit) : '--' }}
+                {{ showDetail ? (holding.profit !== undefined ? (holding.profit >= 0 ? '+' : '') + formatMoney(holding.profit) : '--') : '*****' }}
               </div>
               <div class="profit-rate">
-                {{ holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--' }}
+                {{ showDetail ? (holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--') : '*****' }}
               </div>
             </div>
           </div>
@@ -584,6 +604,12 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
             <van-button square type="danger" text="删除" class="action-btn" @click="handleDelete(holding.code)" />
           </template>
         </van-swipe-cell>
+
+        <div class="add-holding-wrap">
+          <van-button round type="primary" block @click="openAddDialog">
+            新增持有
+          </van-button>
+        </div>
       </template>
 
       <!-- 空状态 -->
@@ -666,19 +692,19 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
             <div class="history-summary-item">
               <div class="summary-label">已实现盈亏</div>
               <div class="summary-value" :class="getChangeStatus(tradeHistorySummary.realizedProfit)">
-                {{ tradeHistorySummary.realizedProfit >= 0 ? '+' : '' }}{{ formatMoney(tradeHistorySummary.realizedProfit) }}
+                {{ showDetail ? (tradeHistorySummary.realizedProfit >= 0 ? '+' : '') + formatMoney(tradeHistorySummary.realizedProfit) : '*****' }}
               </div>
             </div>
             <div class="history-summary-item">
               <div class="summary-label">浮动盈亏</div>
               <div class="summary-value" :class="getChangeStatus(tradeHistorySummary.floatingProfit)">
-                {{ tradeHistorySummary.floatingProfit >= 0 ? '+' : '' }}{{ formatMoney(tradeHistorySummary.floatingProfit) }}
+                {{ showDetail ? (tradeHistorySummary.floatingProfit >= 0 ? '+' : '') + formatMoney(tradeHistorySummary.floatingProfit) : '*****' }}
               </div>
             </div>
             <div class="history-summary-item">
               <div class="summary-label">整体盈利</div>
               <div class="summary-value" :class="getChangeStatus(tradeHistorySummary.totalProfit)">
-                {{ tradeHistorySummary.totalProfit >= 0 ? '+' : '' }}{{ formatMoney(tradeHistorySummary.totalProfit) }}
+                {{ showDetail ? (tradeHistorySummary.totalProfit >= 0 ? '+' : '') + formatMoney(tradeHistorySummary.totalProfit) : '*****' }}
               </div>
             </div>
           </div>
@@ -699,12 +725,12 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
                 </div>
               </div>
               <div class="history-item-right">
-                <div class="history-amount">{{ item.type === 'sell' ? '+' : '-' }}{{ formatMoney(item.amount) }}</div>
+                <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ displayMoney(item.amount) }}</div>
                 <div class="history-profit" :class="getChangeStatus(item.profit)">
-                  {{ item.profit >= 0 ? '+' : '' }}{{ formatMoney(item.profit) }}
+                  {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
                 </div>
                 <div class="history-rate" :class="getChangeStatus(item.profit)">
-                  {{ formatPercent(item.profitRate) }}
+                  {{ showDetail ? formatPercent(item.profitRate) : '*****' }}
                 </div>
               </div>
             </div>
@@ -1118,6 +1144,12 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   margin-bottom: 4px;
 }
 
+.col-name .fund-code {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
 .col-name .fund-meta {
   display: flex;
   align-items: center;
@@ -1156,6 +1188,11 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   gap: 8px;
   margin-top: 8px;
   flex-wrap: wrap;
+}
+
+.add-holding-wrap {
+  padding: 14px 16px 4px;
+  background: var(--bg-secondary);
 }
 
 .col-change, .col-today, .col-profit {
