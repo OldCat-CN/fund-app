@@ -76,6 +76,15 @@ const holdingExpanded = ref(true)
 // ========== 调整成本弹窗 ==========
 const showCostDialog = ref(false)
 const showMoreActions = ref(false)
+const showTradeDialog = ref(false)
+const showTradeHistoryDialog = ref(false)
+const tradeType = ref<'buy' | 'sell'>('buy')
+const tradeFormData = ref({
+  amount: '',
+  shares: '',
+  date: new Date().toISOString().split('T')[0] || '',
+  period: 'before_15' as 'before_15' | 'after_15'
+})
 const costFormData = ref({
   code: '',
   name: '',
@@ -128,6 +137,12 @@ const holdingDetails = computed(() => {
     yesterdayProfit,
     holdDays
   }
+})
+
+const tradeHistorySummary = computed(() => {
+  const nav = holdingInfo.value?.currentValue
+    || parseFloat(fundInfo.value?.gsz || fundInfo.value?.dwjz || '0')
+  return holdingStore.getTradePnLSummaryByFund(fundCode.value, nav)
 })
 
 onMounted(async () => {
@@ -432,13 +447,11 @@ function setReminder() {
 }
 
 function showTransactions() {
-  router.push({
-    path: '/holding',
-    query: {
-      code: fundCode.value,
-      showHistory: '1'
-    }
-  })
+  if (!holdingInfo.value) {
+    showToast('该基金暂无持仓')
+    return
+  }
+  showTradeHistoryDialog.value = true
 }
 
 async function removeFromWatchlist() {
@@ -469,24 +482,80 @@ async function addToWatchlist() {
 }
 
 function showMore() {
+  if (!holdingInfo.value) {
+    showToast('该基金暂无持仓')
+    return
+  }
   showMoreActions.value = true
 }
 
 function handleMoreAction(action: 'buy' | 'sell') {
   showMoreActions.value = false
-  router.push({
-    path: '/holding',
-    query: {
-      code: fundCode.value,
-      trade: action
-    }
-  })
+  tradeType.value = action
+  tradeFormData.value = {
+    amount: '',
+    shares: '',
+    date: new Date().toISOString().split('T')[0] || '',
+    period: 'before_15'
+  }
+  showTradeDialog.value = true
 }
 
 const moreActionOptions = [
   { name: '买入', key: 'buy' },
   { name: '卖出', key: 'sell' }
 ] as const
+
+async function submitTrade() {
+  if (!holdingInfo.value) {
+    showToast('该基金暂无持仓')
+    return
+  }
+
+  if (!tradeFormData.value.date) {
+    showToast('请选择交易日期')
+    return
+  }
+
+  try {
+    if (tradeType.value === 'buy') {
+      const amount = parseFloat(tradeFormData.value.amount)
+      if (!amount || amount <= 0) {
+        showToast('请输入有效买入金额')
+        return
+      }
+      const result = await holdingStore.addBuyTrade({
+        code: fundCode.value,
+        amount,
+        date: tradeFormData.value.date,
+        period: tradeFormData.value.period
+      })
+      showToast(result.pending ? '已记录买入，待基金公司确认净值后生效' : '买入已生效')
+    } else {
+      const shares = parseFloat(tradeFormData.value.shares)
+      if (!shares || shares <= 0) {
+        showToast('请输入有效卖出份额')
+        return
+      }
+      const result = await holdingStore.addSellTrade({
+        code: fundCode.value,
+        shares,
+        date: tradeFormData.value.date,
+        period: tradeFormData.value.period
+      })
+      showToast(result.pending ? '已记录卖出，待基金公司确认净值后生效' : '卖出已生效')
+    }
+
+    await holdingStore.refreshEstimates()
+    showTradeDialog.value = false
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败')
+  }
+}
+
+function formatTradePeriod(period: 'before_15' | 'after_15'): string {
+  return period === 'after_15' ? '15:00后' : '15:00前'
+}
 
 // [WHAT] 跳转同类基金
 function goToSimilarFund(code: string) {
@@ -1210,6 +1279,109 @@ function formatPercent(num: number): string {
       close-on-click-action
       @select="(action: { name: string }) => handleMoreAction(action.name === '卖出' ? 'sell' : 'buy')"
     />
+
+    <!-- 买入/卖出弹窗 -->
+    <van-popup
+      v-model:show="showTradeDialog"
+      position="bottom"
+      round
+      :style="{ height: '52%' }"
+    >
+      <div class="trade-dialog">
+        <div class="dialog-header">
+          <span>{{ tradeType === 'buy' ? '买入' : '卖出' }} {{ fundInfo?.name || fundCode }}</span>
+          <van-icon name="cross" @click="showTradeDialog = false" />
+        </div>
+        <div class="dialog-content">
+          <van-field :model-value="`${fundInfo?.name || ''} (${fundCode})`" label="基金" readonly />
+          <van-field
+            v-if="tradeType === 'buy'"
+            v-model="tradeFormData.amount"
+            type="number"
+            label="买入金额"
+            placeholder="请输入金额（元）"
+          />
+          <van-field
+            v-else
+            v-model="tradeFormData.shares"
+            type="number"
+            label="卖出份额"
+            placeholder="请输入份额"
+          />
+          <van-field v-model="tradeFormData.date" type="date" label="交易日期" />
+          <van-field label="交易时段">
+            <template #input>
+              <van-radio-group v-model="tradeFormData.period" direction="horizontal">
+                <van-radio name="before_15">15:00前</van-radio>
+                <van-radio name="after_15">15:00后</van-radio>
+              </van-radio-group>
+            </template>
+          </van-field>
+          <div class="cost-tip">
+            <van-icon name="info-o" />
+            <span>当日交易会在基金公司确认净值后自动生效</span>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <van-button block type="primary" @click="submitTrade">
+            确认{{ tradeType === 'buy' ? '买入' : '卖出' }}
+          </van-button>
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- 交易记录弹窗 -->
+    <van-popup
+      v-model:show="showTradeHistoryDialog"
+      position="bottom"
+      round
+      :style="{ height: '70%' }"
+    >
+      <div class="trade-history-dialog">
+        <div class="dialog-header">
+          <span>{{ fundInfo?.name || fundCode }} 交易记录</span>
+          <van-icon name="cross" @click="showTradeHistoryDialog = false" />
+        </div>
+        <div class="dialog-content">
+          <div class="history-summary">
+            <div class="history-summary-item">
+              <div class="metric-label">已实现盈亏</div>
+              <div class="metric-value" :class="tradeHistorySummary.realizedProfit >= 0 ? 'up' : 'down'">
+                {{ formatNum(tradeHistorySummary.realizedProfit) }}
+              </div>
+            </div>
+            <div class="history-summary-item">
+              <div class="metric-label">浮动盈亏</div>
+              <div class="metric-value" :class="tradeHistorySummary.floatingProfit >= 0 ? 'up' : 'down'">
+                {{ formatNum(tradeHistorySummary.floatingProfit) }}
+              </div>
+            </div>
+            <div class="history-summary-item">
+              <div class="metric-label">整体盈利</div>
+              <div class="metric-value" :class="tradeHistorySummary.totalProfit >= 0 ? 'up' : 'down'">
+                {{ formatNum(tradeHistorySummary.totalProfit) }}
+              </div>
+            </div>
+          </div>
+
+          <div v-if="tradeHistorySummary.items.length > 0" class="history-list">
+            <div v-for="item in tradeHistorySummary.items" :key="item.id" class="history-item">
+              <div class="history-item-left">
+                <div class="history-type" :class="item.type">{{ item.type === 'buy' ? '买入' : '卖出' }}</div>
+                <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
+                <div class="history-detail">{{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}</div>
+              </div>
+              <div class="history-item-right">
+                <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ formatNum(item.amount) }}</div>
+                <div class="history-profit" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatNum(item.profit) }}</div>
+                <div class="history-rate" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatPercent(item.profitRate) }}</div>
+              </div>
+            </div>
+          </div>
+          <van-empty v-else description="暂无交易记录" />
+        </div>
+      </div>
+    </van-popup>
 
     <!-- 调整成本弹窗 -->
     <van-popup
@@ -2252,6 +2424,102 @@ function formatPercent(num: number): string {
 
 .bar-item:active {
   opacity: 0.7;
+}
+
+/* ========== 买卖与交易记录弹窗 ========== */
+.trade-dialog,
+.trade-history-dialog {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+}
+
+.trade-dialog .dialog-header,
+.trade-history-dialog .dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.trade-dialog .dialog-content,
+.trade-history-dialog .dialog-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.trade-dialog .dialog-footer {
+  padding: 12px 16px 16px;
+}
+
+.history-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.history-summary-item {
+  padding: 10px 8px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  text-align: center;
+}
+
+.history-list {
+  padding: 8px 0;
+}
+
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.history-item-left {
+  flex: 1;
+}
+
+.history-type {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.history-type.buy { color: var(--color-up); }
+.history-type.sell { color: var(--color-down); }
+
+.history-meta,
+.history-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+.history-item-right {
+  text-align: right;
+}
+
+.history-amount {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.history-profit {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 3px;
+}
+
+.history-rate {
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 /* ========== 调整成本弹窗 ========== */
