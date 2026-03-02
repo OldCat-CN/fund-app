@@ -660,6 +660,14 @@ export const useHoldingStore = defineStore('holding', () => {
       })
   }
 
+  function deleteTradeRecord(id: string): boolean {
+    const index = tradeRecords.value.findIndex(t => t.id === id)
+    if (index === -1) return false
+    tradeRecords.value.splice(index, 1)
+    saveHoldingTradeRecords(tradeRecords.value)
+    return true
+  }
+
   function getTradePnLSummaryByFund(code: string, currentNav?: number) {
     const records = getTradeRecordsByFund(code)
     const holding = getHoldingByCode(code)
@@ -745,6 +753,7 @@ export const useHoldingStore = defineStore('holding', () => {
     addBuyTrade,
     addSellTrade,
     getTradeRecordsByFund,
+    deleteTradeRecord,
     getTradePnLSummaryByFund,
     removeHolding,
     hasHolding,

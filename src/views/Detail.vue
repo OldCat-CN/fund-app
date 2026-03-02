@@ -557,6 +557,24 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   return period === 'after_15' ? '15:00后' : '15:00前'
 }
 
+async function deleteTradeRecord(id: string) {
+  try {
+    await showConfirmDialog({
+      title: '删除交易',
+      message: '确定删除这条交易记录吗？'
+    })
+    const ok = holdingStore.deleteTradeRecord(id)
+    if (ok) {
+      showToast('已删除')
+      await holdingStore.refreshEstimates()
+    } else {
+      showToast('删除失败')
+    }
+  } catch {
+    // 用户取消
+  }
+}
+
 // [WHAT] 跳转同类基金
 function goToSimilarFund(code: string) {
   if (code === fundCode.value) {
@@ -709,47 +727,47 @@ function formatPercent(num: number): string {
       <!-- 详细信息（展开时显示） -->
       <transition name="slide">
         <div v-show="holdingExpanded" class="holding-grid">
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">持有金额</div>
             <div class="item-value">{{ formatNum(holdingDetails.amount) }}</div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">持有份额</div>
             <div class="item-value">{{ formatNum(holdingDetails.shares) }}</div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">持仓占比</div>
             <div class="item-value">{{ holdingDetails.ratio.toFixed(2) }}%</div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">持有收益</div>
             <div class="item-value" :class="holdingDetails.profit >= 0 ? 'up' : 'down'">
               {{ formatNum(holdingDetails.profit) }}
             </div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">持有收益率</div>
             <div class="item-value" :class="holdingDetails.profitRate >= 0 ? 'up' : 'down'">
               {{ formatPercent(holdingDetails.profitRate) }}
             </div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">持仓成本</div>
             <div class="item-value">{{ holdingDetails.cost.toFixed(4) }}</div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">当日收益</div>
             <div class="item-value" :class="holdingDetails.todayProfit >= 0 ? 'up' : 'down'">
               {{ formatNum(holdingDetails.todayProfit) }}
             </div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">昨日收益</div>
             <div class="item-value" :class="holdingDetails.yesterdayProfit >= 0 ? 'up' : 'down'">
               {{ formatNum(holdingDetails.yesterdayProfit) }}
             </div>
           </div>
-          <div class="holding-item">
+          <div class="position-item">
             <div class="item-label">持有天数</div>
             <div class="item-value">{{ holdingDetails.holdDays }}</div>
           </div>
@@ -1365,18 +1383,23 @@ function formatPercent(num: number): string {
           </div>
 
           <div v-if="tradeHistorySummary.items.length > 0" class="history-list">
-            <div v-for="item in tradeHistorySummary.items" :key="item.id" class="history-item">
-              <div class="history-item-left">
-                <div class="history-type" :class="item.type">{{ item.type === 'buy' ? '买入' : '卖出' }}</div>
-                <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
-                <div class="history-detail">{{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}</div>
+            <van-swipe-cell v-for="item in tradeHistorySummary.items" :key="item.id">
+              <div class="history-item">
+                <div class="history-item-left">
+                  <div class="history-type" :class="item.type">{{ item.type === 'buy' ? '买入' : '卖出' }}</div>
+                  <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
+                  <div class="history-detail">{{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}</div>
+                </div>
+                <div class="history-item-right">
+                  <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ formatNum(item.amount) }}</div>
+                  <div class="history-profit" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatNum(item.profit) }}</div>
+                  <div class="history-rate" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatPercent(item.profitRate) }}</div>
+                </div>
               </div>
-              <div class="history-item-right">
-                <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ formatNum(item.amount) }}</div>
-                <div class="history-profit" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatNum(item.profit) }}</div>
-                <div class="history-rate" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatPercent(item.profitRate) }}</div>
-              </div>
-            </div>
+              <template #right>
+                <van-button square type="danger" text="删除" @click="deleteTradeRecord(item.id)" />
+              </template>
+            </van-swipe-cell>
           </div>
           <van-empty v-else description="暂无交易记录" />
         </div>
@@ -1566,7 +1589,8 @@ function formatPercent(num: number): string {
 
 /* 简要信息（收起时显示） */
 .holding-summary {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   align-items: center;
   gap: 16px;
   cursor: pointer;
@@ -1582,22 +1606,24 @@ function formatPercent(num: number): string {
 }
 
 .summary-item {
-  flex: 1;
-  text-align: center;
+  min-width: 0;
+  text-align: left;
 }
 
 .summary-label {
   display: block;
   font-size: 11px;
   color: var(--text-secondary);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .summary-value {
-  font-size: 15px;
+  font-size: 16px;
+  line-height: 1.2;
   font-weight: 600;
   font-family: 'DIN Alternate', -apple-system, monospace;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .summary-value.up { color: #f56c6c; }
@@ -1611,24 +1637,33 @@ function formatPercent(num: number): string {
 .holding-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  gap: 12px;
 }
 
-.holding-item {
-  text-align: center;
+.position-item {
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 10px 10px 12px;
+  min-height: 66px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .item-label {
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.2;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .item-value {
   font-size: 16px;
+  line-height: 1.2;
   font-weight: 600;
   font-family: 'DIN Alternate', -apple-system, monospace;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .item-value.up { color: #f56c6c; }
