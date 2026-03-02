@@ -691,47 +691,39 @@ function displayMoney(value: number | string | undefined): string {
       class="holding-list-container"
     >
       <template v-if="holdingStore.holdings.length > 0">
-        <van-swipe-cell v-for="holding in holdingStore.holdings" :key="holding.code">
-          <div class="holding-item" @click="goToDetail(holding.code)">
-            <div class="col-name">
-              <div class="fund-name">{{ holding.name || '加载中...' }}</div>
-              <div class="fund-code">{{ holding.code }}</div>
-              <div class="fund-meta">
-                <!-- [FIX] #49, #46 根据实际状态显示更新标识 -->
-                <span v-if="holding.loading" class="tag loading">加载中</span>
-                <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">已更新</span>
-                <span v-else class="tag pending">待更新</span>
-                <span class="amount">市值 ¥{{ displayMoney(holding.marketValue || holding.amount) }}</span>
-              </div>
-              <div class="trade-actions" @click.stop>
-                <van-button size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
-                <van-button size="mini" type="success" plain @click="openTradeDialog('sell', holding.code)">卖出</van-button>
-                <van-button size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
-              </div>
+        <div v-for="holding in holdingStore.holdings" :key="holding.code" class="holding-item" @click="goToDetail(holding.code)">
+          <div class="col-name">
+            <div class="fund-name">{{ holding.name || '加载中...' }}</div>
+            <div class="fund-code">{{ holding.code }}</div>
+            <div class="fund-meta">
+              <!-- [FIX] #49, #46 根据实际状态显示更新标识 -->
+              <span v-if="holding.loading" class="tag loading">加载中</span>
+              <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">已更新</span>
+              <span v-else class="tag pending">待更新</span>
+              <span class="amount">市值 ¥{{ displayMoney(holding.marketValue || holding.amount) }}</span>
             </div>
-            <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
-              {{ formatPercent(holding.todayChange || 0) }}
-            </div>
-            <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
-              {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
-            </div>
-            <div class="col-profit" :class="getChangeStatus(holding.profit || 0)">
-              <div class="profit-amount">
-                {{ showDetail ? (holding.profit !== undefined ? (holding.profit >= 0 ? '+' : '') + formatMoney(holding.profit) : '--') : '*****' }}
-              </div>
-              <div class="profit-rate">
-                {{ holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--' }}
-              </div>
+            <div class="trade-actions" @click.stop>
+              <van-button size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
+              <van-button size="mini" type="success" plain @click="openTradeDialog('sell', holding.code)">卖出</van-button>
+              <van-button size="mini" type="danger" plain @click="handleDelete(holding.code)">删除</van-button>
+              <van-button size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
             </div>
           </div>
-          
-          <!-- 滑动操作按钮 -->
-          <template #right>
-            <van-button square type="warning" text="调整" class="action-btn" @click="openCostDialog(holding.code)" />
-            <van-button square type="primary" text="编辑" class="action-btn" @click="handleEdit(holding.code)" />
-            <van-button square type="danger" text="删除" class="action-btn" @click="handleDelete(holding.code)" />
-          </template>
-        </van-swipe-cell>
+          <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
+            {{ formatPercent(holding.todayChange || 0) }}
+          </div>
+          <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
+            {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
+          </div>
+          <div class="col-profit" :class="getChangeStatus(holding.profit || 0)">
+            <div class="profit-amount">
+              {{ showDetail ? (holding.profit !== undefined ? (holding.profit >= 0 ? '+' : '') + formatMoney(holding.profit) : '--') : '*****' }}
+            </div>
+            <div class="profit-rate">
+              {{ holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--' }}
+            </div>
+          </div>
+        </div>
 
         <div class="add-holding-wrap">
           <van-button round type="primary" block @click="openAddDialog">
@@ -838,32 +830,30 @@ function displayMoney(value: number | string | undefined): string {
           </div>
 
           <div v-if="tradeHistorySummary.items.length > 0" class="history-list">
-            <van-swipe-cell v-for="item in tradeHistorySummary.items" :key="item.id">
-              <div class="history-item">
-                <div class="history-item-left">
-                  <div class="history-type" :class="item.type">
-                    {{ item.type === 'buy' ? '买入' : '卖出' }}
-                  </div>
-                  <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
-                  <div class="history-detail">
-                    {{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}
-                  </div>
+            <div v-for="item in tradeHistorySummary.items" :key="item.id" class="history-item">
+              <div class="history-item-left">
+                <div class="history-type" :class="item.type">
+                  {{ item.type === 'buy' ? '买入' : '卖出' }}
                 </div>
-                <div class="history-item-right">
-                  <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ displayMoney(item.amount) }}</div>
-                  <div class="history-profit" :class="getChangeStatus(item.profit)">
-                    {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
-                  </div>
-                  <div class="history-rate" :class="getChangeStatus(item.profit)">
-                    {{ formatPercent(item.profitRate) }}
-                  </div>
+                <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
+                <div class="history-detail">
+                  {{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}
                 </div>
               </div>
-              <template #right>
-                <van-button square type="primary" text="修改" @click="openTradeEditDialog(item)" />
-                <van-button square type="danger" text="删除" @click="deleteTradeRecord(item.id)" />
-              </template>
-            </van-swipe-cell>
+              <div class="history-item-right">
+                <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ displayMoney(item.amount) }}</div>
+                <div class="history-profit" :class="getChangeStatus(item.profit)">
+                  {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
+                </div>
+                <div class="history-rate" :class="getChangeStatus(item.profit)">
+                  {{ formatPercent(item.profitRate) }}
+                </div>
+                <div class="history-actions">
+                  <van-button size="mini" type="primary" plain @click="openTradeEditDialog(item)">修改</van-button>
+                  <van-button size="mini" type="danger" plain @click="deleteTradeRecord(item.id)">删除</van-button>
+                </div>
+              </div>
+            </div>
           </div>
           <van-empty v-else description="暂无买卖记录" />
         </div>
@@ -1582,6 +1572,9 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 .history-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   text-align: right;
 }
 
@@ -1599,6 +1592,12 @@ function displayMoney(value: number | string | undefined): string {
 .history-rate {
   font-size: 12px;
   margin-top: 2px;
+}
+
+.history-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 /* 调整成本弹窗 */
