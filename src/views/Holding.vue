@@ -54,6 +54,18 @@ const costFormData = ref({
   shares: ''  // 份额（可选修改）
 })
 
+// ========== 买入/卖出 ==========
+const showTradeDialog = ref(false)
+const tradeType = ref<'buy' | 'sell'>('buy')
+const tradeFormData = ref({
+  code: '',
+  name: '',
+  amount: '',
+  shares: '',
+  date: '',
+  time: ''
+})
+
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
   holdingStore.initHoldings()
@@ -67,6 +79,8 @@ const summaryProfitClass = computed(() => {
 const summaryTodayClass = computed(() => {
   return getChangeStatus(holdingStore.summary.todayProfit)
 })
+
+const pendingTradeCount = computed(() => holdingStore.pendingTrades.length)
 
 // [WHAT] 下拉刷新
 async function onRefresh() {
@@ -349,6 +363,86 @@ function goToDetail(code: string) {
   router.push(`/detail/${code}`)
 }
 
+function getNowTime(): string {
+  const now = new Date()
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+}
+
+// [WHAT] 打开买入/卖出弹窗
+function openTradeDialog(type: 'buy' | 'sell', code: string) {
+  const holding = holdingStore.getHoldingByCode(code)
+  if (!holding) return
+
+  tradeType.value = type
+  tradeFormData.value = {
+    code: holding.code,
+    name: holding.name,
+    amount: '',
+    shares: '',
+    date: new Date().toISOString().split('T')[0] || '',
+    time: getNowTime()
+  }
+  showTradeDialog.value = true
+}
+
+// [WHAT] 提交买入/卖出
+async function submitTrade() {
+  if (!tradeFormData.value.date) {
+    showToast('请选择交易日期')
+    return
+  }
+  if (!tradeFormData.value.time) {
+    showToast('请选择交易时间')
+    return
+  }
+
+  try {
+    if (tradeType.value === 'buy') {
+      const amount = parseFloat(tradeFormData.value.amount)
+      if (!amount || amount <= 0) {
+        showToast('请输入有效买入金额')
+        return
+      }
+
+      const result = await holdingStore.addBuyTrade({
+        code: tradeFormData.value.code,
+        amount,
+        date: tradeFormData.value.date,
+        time: tradeFormData.value.time
+      })
+
+      if (result.pending) {
+        showToast('已记录买入，待基金公司确认当日净值后生效')
+      } else {
+        showToast('买入已生效')
+      }
+    } else {
+      const shares = parseFloat(tradeFormData.value.shares)
+      if (!shares || shares <= 0) {
+        showToast('请输入有效卖出份额')
+        return
+      }
+
+      const result = await holdingStore.addSellTrade({
+        code: tradeFormData.value.code,
+        shares,
+        date: tradeFormData.value.date,
+        time: tradeFormData.value.time
+      })
+
+      if (result.pending) {
+        showToast('已记录卖出，待基金公司确认当日净值后生效')
+      } else {
+        showToast('卖出已生效')
+      }
+    }
+
+    showTradeDialog.value = false
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败')
+  }
+}
+
 // [WHAT] 截图导入完成回调
 function onImported(count: number) {
   // [WHAT] 导入完成后刷新持仓列表
@@ -407,6 +501,9 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
           </div>
         </div>
       </div>
+      <div v-if="pendingTradeCount > 0" class="pending-tip">
+        待确认交易 {{ pendingTradeCount }} 笔（基金公司公布当日净值后自动生效）
+      </div>
     </div>
 
     <!-- 持仓列表表头 -->
@@ -434,6 +531,10 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
                 <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">已更新</span>
                 <span v-else class="tag pending">待更新</span>
                 <span class="amount">¥{{ formatMoney(holding.amount) }}</span>
+              </div>
+              <div class="trade-actions" @click.stop>
+                <van-button size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
+                <van-button size="mini" type="success" plain @click="openTradeDialog('sell', holding.code)">卖出</van-button>
               </div>
             </div>
             <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
@@ -471,6 +572,51 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
       <!-- 底部占位，避免被导航栏遮挡 -->
       <div class="bottom-spacer"></div>
     </van-pull-refresh>
+
+    <!-- 买入/卖出弹窗 -->
+    <van-popup
+      v-model:show="showTradeDialog"
+      position="bottom"
+      round
+      :style="{ height: '52%' }"
+    >
+      <div class="add-dialog">
+        <div class="dialog-header">
+          <span>{{ tradeType === 'buy' ? '买入' : '卖出' }} {{ tradeFormData.name }}</span>
+          <van-icon name="cross" @click="showTradeDialog = false" />
+        </div>
+        <div class="dialog-content">
+          <van-field :model-value="`${tradeFormData.name} (${tradeFormData.code})`" label="基金" readonly />
+
+          <van-field
+            v-if="tradeType === 'buy'"
+            v-model="tradeFormData.amount"
+            type="number"
+            label="买入金额"
+            placeholder="请输入金额（元）"
+          />
+          <van-field
+            v-else
+            v-model="tradeFormData.shares"
+            type="number"
+            label="卖出份额"
+            placeholder="请输入份额"
+          />
+
+          <van-field v-model="tradeFormData.date" type="date" label="交易日期" />
+          <van-field v-model="tradeFormData.time" type="time" label="交易时间" />
+
+          <div class="fee-tip">
+            <van-icon name="info-o" />
+            <span>当日交易将在基金公司确认净值后自动更新，历史日期按对应净值直接更新。</span>
+          </div>
+
+          <van-button block type="primary" @click="submitTrade">
+            确认{{ tradeType === 'buy' ? '买入' : '卖出' }}
+          </van-button>
+        </div>
+      </div>
+    </van-popup>
 
     <!-- 添加/编辑持仓弹窗 -->
     <van-popup
@@ -802,6 +948,16 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
   color: #67c23a;  /* 绿跌 */
 }
 
+.pending-tip {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color);
+  font-size: 12px;
+  color: var(--text-secondary);
+  position: relative;
+  z-index: 1;
+}
+
 /* 列表表头 */
 .list-header {
   display: grid;
@@ -897,6 +1053,12 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
 .col-name .amount {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.trade-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .col-change, .col-today, .col-profit {
