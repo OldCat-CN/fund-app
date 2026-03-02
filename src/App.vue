@@ -185,9 +185,24 @@ function onTabChange(index: number) {
 
 /* [WHY] Varlet 底部导航适配 */
 :deep(.var-bottom-navigation) {
-  --bottom-navigation-background: var(--bg-secondary);
+  --bottom-navigation-background-color: var(--bg-secondary);
+  --bottom-navigation-border-color: var(--border-color);
   --bottom-navigation-item-active-color: var(--color-primary);
+  --bottom-navigation-item-inactive-color: var(--text-secondary);
   border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary) !important;
+}
+
+:deep(.var-bottom-navigation-item) {
+  color: var(--text-secondary);
+}
+
+:deep(.var-bottom-navigation-item--active) {
+  color: var(--color-primary);
+}
+
+:deep(.var-bottom-navigation-item__label) {
+  color: inherit;
 }
 
 /* [WHY] 全局水印样式 */

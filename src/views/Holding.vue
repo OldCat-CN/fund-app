@@ -703,10 +703,10 @@ function displayMoney(value: number | string | undefined): string {
               <span class="amount">市值 ¥{{ displayMoney(holding.marketValue || holding.amount) }}</span>
             </div>
             <div class="trade-actions" @click.stop>
-              <van-button size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
-              <van-button size="mini" type="success" plain @click="openTradeDialog('sell', holding.code)">卖出</van-button>
-              <van-button size="mini" type="danger" plain @click="handleDelete(holding.code)">删除</van-button>
-              <van-button size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
+              <van-button class="trade-btn buy" size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
+              <van-button class="trade-btn sell" size="mini" type="success" plain @click="openTradeDialog('sell', holding.code)">卖出</van-button>
+              <van-button class="trade-btn delete" size="mini" type="danger" plain @click="handleDelete(holding.code)">删除</van-button>
+              <van-button class="trade-btn history" size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
             </div>
           </div>
           <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
@@ -849,8 +849,8 @@ function displayMoney(value: number | string | undefined): string {
                   {{ formatPercent(item.profitRate) }}
                 </div>
                 <div class="history-actions">
-                  <van-button size="mini" type="primary" plain @click="openTradeEditDialog(item)">修改</van-button>
-                  <van-button size="mini" type="danger" plain @click="deleteTradeRecord(item.id)">删除</van-button>
+                  <van-button class="history-btn edit" size="mini" type="primary" plain @click="openTradeEditDialog(item)">修改</van-button>
+                  <van-button class="history-btn delete" size="mini" type="danger" plain @click="deleteTradeRecord(item.id)">删除</van-button>
                 </div>
               </div>
             </div>
@@ -1357,6 +1357,34 @@ function displayMoney(value: number | string | undefined): string {
   flex-wrap: wrap;
 }
 
+.trade-actions :deep(.trade-btn) {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.trade-actions :deep(.trade-btn.buy) {
+  color: var(--color-up);
+  border-color: var(--color-up);
+  background: var(--color-up-bg);
+}
+
+.trade-actions :deep(.trade-btn.sell) {
+  color: var(--color-down);
+  border-color: var(--color-down);
+  background: var(--color-down-bg);
+}
+
+.trade-actions :deep(.trade-btn.delete) {
+  color: var(--color-up);
+  border-color: var(--color-up);
+}
+
+.trade-actions :deep(.trade-btn.history) {
+  color: var(--color-info);
+  border-color: var(--color-info);
+  background: var(--color-info-bg);
+}
+
 .add-holding-wrap {
   padding: 14px 16px 4px;
   background: var(--bg-secondary);
@@ -1598,6 +1626,22 @@ function displayMoney(value: number | string | undefined): string {
   display: flex;
   gap: 6px;
   margin-top: 8px;
+}
+
+.history-actions :deep(.history-btn) {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.history-actions :deep(.history-btn.edit) {
+  color: var(--color-info);
+  border-color: var(--color-info);
+  background: var(--color-info-bg);
+}
+
+.history-actions :deep(.history-btn.delete) {
+  color: var(--color-up);
+  border-color: var(--color-up);
 }
 
 /* 调整成本弹窗 */
