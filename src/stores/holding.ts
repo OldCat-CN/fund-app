@@ -31,7 +31,27 @@ interface PendingTrade {
   createdAt: number
 }
 
+interface HoldingTradeRecord {
+  id: string
+  code: string
+  name: string
+  type: HoldingTradeType
+  date: string
+  period: 'before_15' | 'after_15'
+  nav: number
+  amount: number
+  shares: number
+  createdAt: number
+}
+
+interface HoldingTradePnLRecord extends HoldingTradeRecord {
+  profit: number
+  profitRate: number
+  mode: 'floating' | 'realized'
+}
+
 const PENDING_TRADE_KEY = 'fund_pending_holding_trades'
+const HOLDING_TRADE_KEY = 'fund_holding_trade_records'
 
 function loadPendingTrades(): PendingTrade[] {
   try {
@@ -44,6 +64,19 @@ function loadPendingTrades(): PendingTrade[] {
 
 function savePendingTrades(list: PendingTrade[]) {
   localStorage.setItem(PENDING_TRADE_KEY, JSON.stringify(list))
+}
+
+function loadHoldingTradeRecords(): HoldingTradeRecord[] {
+  try {
+    const raw = localStorage.getItem(HOLDING_TRADE_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveHoldingTradeRecords(list: HoldingTradeRecord[]) {
+  localStorage.setItem(HOLDING_TRADE_KEY, JSON.stringify(list))
 }
 
 /** 持仓项（包含实时估值和收益计算） */
@@ -75,6 +108,8 @@ export const useHoldingStore = defineStore('holding', () => {
   
   /** 当日待确认交易（基金公司净值确认后生效） */
   const pendingTrades = ref<PendingTrade[]>(loadPendingTrades())
+  /** 持仓买卖记录（用于交易明细与盈亏统计） */
+  const tradeRecords = ref<HoldingTradeRecord[]>(loadHoldingTradeRecords())
 
   // ========== Getters ==========
 
@@ -127,6 +162,23 @@ export const useHoldingStore = defineStore('holding', () => {
       ...r,
       loading: true
     }))
+    // [兼容] 老版本无交易记录时，用持仓生成初始买入记录
+    if (records.length > 0 && tradeRecords.value.length === 0) {
+      const seedRecords: HoldingTradeRecord[] = records.map(r => ({
+        id: `holding_seed_${r.code}_${r.createdAt}`,
+        code: r.code,
+        name: r.name,
+        type: 'buy',
+        date: r.buyDate,
+        period: 'before_15',
+        nav: r.buyNetValue,
+        amount: r.amount,
+        shares: r.shares,
+        createdAt: r.createdAt
+      }))
+      tradeRecords.value = seedRecords
+      saveHoldingTradeRecords(tradeRecords.value)
+    }
     // 初始化后立即刷新估值
     if (records.length > 0) {
       refreshEstimates()
@@ -280,6 +332,8 @@ export const useHoldingStore = defineStore('holding', () => {
     }
     pendingTrades.value = pendingTrades.value.filter(t => t.code !== code)
     savePendingTrades(pendingTrades.value)
+    tradeRecords.value = tradeRecords.value.filter(t => t.code !== code)
+    saveHoldingTradeRecords(tradeRecords.value)
   }
 
   /**
@@ -330,6 +384,16 @@ export const useHoldingStore = defineStore('holding', () => {
     pendingTrades.value.push(trade)
     pendingTrades.value = sortPendingTrades(pendingTrades.value)
     savePendingTrades(pendingTrades.value)
+  }
+
+  function addTradeRecord(params: Omit<HoldingTradeRecord, 'id' | 'createdAt'>) {
+    const record: HoldingTradeRecord = {
+      ...params,
+      id: `holding_trade_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: Date.now()
+    }
+    tradeRecords.value.push(record)
+    saveHoldingTradeRecords(tradeRecords.value)
   }
 
   async function getNavByDate(code: string, date: string): Promise<number | null> {
@@ -422,8 +486,28 @@ export const useHoldingStore = defineStore('holding', () => {
       try {
         if (trade.type === 'buy') {
           applyBuyToHolding(code, trade.amount || 0, data.nav, trade.date)
+          addTradeRecord({
+            code,
+            name: trade.name,
+            type: 'buy',
+            date: trade.date,
+            period: trade.period || 'before_15',
+            nav: data.nav,
+            amount: trade.amount || 0,
+            shares: data.nav > 0 ? (trade.amount || 0) / data.nav : 0
+          })
         } else {
           applySellToHolding(code, trade.shares || 0)
+          addTradeRecord({
+            code,
+            name: trade.name,
+            type: 'sell',
+            date: trade.date,
+            period: trade.period || 'before_15',
+            nav: data.nav,
+            amount: (trade.shares || 0) * data.nav,
+            shares: trade.shares || 0
+          })
         }
       } catch {
         // [EDGE] 异常待确认单直接跳过，避免阻塞其他持仓刷新
@@ -455,6 +539,16 @@ export const useHoldingStore = defineStore('holding', () => {
       const accurateData = await fetchFundAccurateData(code).catch(() => null)
       if (accurateData && accurateData.navDate === today && accurateData.nav > 0) {
         applyBuyToHolding(code, amount, accurateData.nav, date)
+        addTradeRecord({
+          code,
+          name: holding.name,
+          type: 'buy',
+          date,
+          period,
+          nav: accurateData.nav,
+          amount,
+          shares: amount / accurateData.nav
+        })
         await refreshEstimates()
         return { pending: false }
       }
@@ -473,6 +567,16 @@ export const useHoldingStore = defineStore('holding', () => {
     const nav = await getNavByDate(code, date)
     if (!nav) throw new Error('未找到该日期可用净值')
     applyBuyToHolding(code, amount, nav, date)
+    addTradeRecord({
+      code,
+      name: holding.name,
+      type: 'buy',
+      date,
+      period,
+      nav,
+      amount,
+      shares: amount / nav
+    })
     await refreshEstimates()
     return { pending: false }
   }
@@ -499,6 +603,16 @@ export const useHoldingStore = defineStore('holding', () => {
       const accurateData = await fetchFundAccurateData(code).catch(() => null)
       if (accurateData && accurateData.navDate === today && accurateData.nav > 0) {
         applySellToHolding(code, shares)
+        addTradeRecord({
+          code,
+          name: holding.name,
+          type: 'sell',
+          date,
+          period,
+          nav: accurateData.nav,
+          amount: shares * accurateData.nav,
+          shares
+        })
         await refreshEstimates()
         return { pending: false }
       }
@@ -524,8 +638,79 @@ export const useHoldingStore = defineStore('holding', () => {
     const nav = await getNavByDate(code, date)
     if (!nav) throw new Error('未找到该日期可用净值')
     applySellToHolding(code, shares)
+    addTradeRecord({
+      code,
+      name: holding.name,
+      type: 'sell',
+      date,
+      period,
+      nav,
+      amount: shares * nav,
+      shares
+    })
     await refreshEstimates()
     return { pending: false }
+  }
+
+  function getTradeRecordsByFund(code: string): HoldingTradeRecord[] {
+    return tradeRecords.value
+      .filter(t => t.code === code)
+      .sort((a, b) => {
+        return toTimeValue(a.date, a.period) - toTimeValue(b.date, b.period) || a.createdAt - b.createdAt
+      })
+  }
+
+  function getTradePnLSummaryByFund(code: string, currentNav?: number) {
+    const records = getTradeRecordsByFund(code)
+    const holding = getHoldingByCode(code)
+    const latestNav = (currentNav && currentNav > 0) ? currentNav : (holding?.currentValue || holding?.buyNetValue || 0)
+
+    let remainingShares = 0
+    let remainingCost = 0
+    let realizedProfit = 0
+    const items: HoldingTradePnLRecord[] = []
+
+    for (const record of records) {
+      if (record.type === 'buy') {
+        remainingShares += record.shares
+        remainingCost += record.amount
+        const profit = latestNav > 0 ? (latestNav - record.nav) * record.shares : 0
+        const profitRate = record.amount > 0 ? (profit / record.amount) * 100 : 0
+        items.push({
+          ...record,
+          profit,
+          profitRate,
+          mode: 'floating'
+        })
+      } else {
+        const avgCostBefore = remainingShares > 0 ? remainingCost / remainingShares : 0
+        const usedShares = Math.min(record.shares, Math.max(0, remainingShares))
+        const costPart = avgCostBefore * usedShares
+        const profit = record.amount - costPart
+        const profitRate = costPart > 0 ? (profit / costPart) * 100 : 0
+        realizedProfit += profit
+        remainingShares = Math.max(0, remainingShares - usedShares)
+        remainingCost = Math.max(0, remainingCost - costPart)
+        items.push({
+          ...record,
+          profit,
+          profitRate,
+          mode: 'realized'
+        })
+      }
+    }
+
+    const floatingProfit = latestNav > 0 && remainingShares > 0
+      ? remainingShares * latestNav - remainingCost
+      : 0
+    const totalProfit = realizedProfit + floatingProfit
+
+    return {
+      items,
+      realizedProfit,
+      floatingProfit,
+      totalProfit
+    }
   }
 
   /**
@@ -549,6 +734,7 @@ export const useHoldingStore = defineStore('holding', () => {
     holdings,
     isRefreshing,
     pendingTrades,
+    tradeRecords,
     // Getters
     summary,
     holdingCodes,
@@ -558,6 +744,8 @@ export const useHoldingStore = defineStore('holding', () => {
     addOrUpdateHolding,
     addBuyTrade,
     addSellTrade,
+    getTradeRecordsByFund,
+    getTradePnLSummaryByFund,
     removeHolding,
     hasHolding,
     getHoldingByCode,

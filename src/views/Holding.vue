@@ -67,6 +67,11 @@ const tradeFormData = ref({
 })
 const todayDate = new Date().toISOString().split('T')[0] || ''
 
+// ========== 交易记录弹窗 ==========
+const showTradeHistoryDialog = ref(false)
+const historyFundCode = ref('')
+const historyFundName = ref('')
+
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
   holdingStore.initHoldings()
@@ -82,6 +87,12 @@ const summaryTodayClass = computed(() => {
 })
 
 const pendingTradeCount = computed(() => holdingStore.pendingTrades.length)
+const tradeHistorySummary = computed(() => {
+  if (!historyFundCode.value) {
+    return { items: [], realizedProfit: 0, floatingProfit: 0, totalProfit: 0 }
+  }
+  return holdingStore.getTradePnLSummaryByFund(historyFundCode.value)
+})
 
 // [WHAT] 下拉刷新
 async function onRefresh() {
@@ -381,6 +392,14 @@ function openTradeDialog(type: 'buy' | 'sell', code: string) {
   showTradeDialog.value = true
 }
 
+function openTradeHistoryDialog(code: string) {
+  const holding = holdingStore.getHoldingByCode(code)
+  if (!holding) return
+  historyFundCode.value = code
+  historyFundName.value = holding.name
+  showTradeHistoryDialog.value = true
+}
+
 // [WHAT] 提交买入/卖出
 async function submitTrade() {
   if (!tradeFormData.value.date) {
@@ -459,6 +478,10 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
   }
   showDatePicker.value = false
 }
+
+function formatTradePeriod(period: 'before_15' | 'after_15'): string {
+  return period === 'after_15' ? '15:00后' : '15:00前'
+}
 </script>
 
 <template>
@@ -530,11 +553,12 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
                 <span v-if="holding.loading" class="tag loading">加载中</span>
                 <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">已更新</span>
                 <span v-else class="tag pending">待更新</span>
-                <span class="amount">¥{{ formatMoney(holding.amount) }}</span>
+                <span class="amount">市值 ¥{{ formatMoney(holding.marketValue || holding.amount) }}</span>
               </div>
               <div class="trade-actions" @click.stop>
                 <van-button size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
                 <van-button size="mini" type="success" plain @click="openTradeDialog('sell', holding.code)">卖出</van-button>
+                <van-button size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
               </div>
             </div>
             <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
@@ -621,6 +645,71 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
           <van-button block type="primary" @click="submitTrade">
             确认{{ tradeType === 'buy' ? '买入' : '卖出' }}
           </van-button>
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- 交易记录弹窗 -->
+    <van-popup
+      v-model:show="showTradeHistoryDialog"
+      position="bottom"
+      round
+      :style="{ height: '70%' }"
+    >
+      <div class="trade-history-dialog">
+        <div class="dialog-header">
+          <span>{{ historyFundName }} 交易记录</span>
+          <van-icon name="cross" @click="showTradeHistoryDialog = false" />
+        </div>
+        <div class="dialog-content">
+          <div class="history-summary">
+            <div class="history-summary-item">
+              <div class="summary-label">已实现盈亏</div>
+              <div class="summary-value" :class="getChangeStatus(tradeHistorySummary.realizedProfit)">
+                {{ tradeHistorySummary.realizedProfit >= 0 ? '+' : '' }}{{ formatMoney(tradeHistorySummary.realizedProfit) }}
+              </div>
+            </div>
+            <div class="history-summary-item">
+              <div class="summary-label">浮动盈亏</div>
+              <div class="summary-value" :class="getChangeStatus(tradeHistorySummary.floatingProfit)">
+                {{ tradeHistorySummary.floatingProfit >= 0 ? '+' : '' }}{{ formatMoney(tradeHistorySummary.floatingProfit) }}
+              </div>
+            </div>
+            <div class="history-summary-item">
+              <div class="summary-label">整体盈利</div>
+              <div class="summary-value" :class="getChangeStatus(tradeHistorySummary.totalProfit)">
+                {{ tradeHistorySummary.totalProfit >= 0 ? '+' : '' }}{{ formatMoney(tradeHistorySummary.totalProfit) }}
+              </div>
+            </div>
+          </div>
+
+          <div v-if="tradeHistorySummary.items.length > 0" class="history-list">
+            <div
+              v-for="item in tradeHistorySummary.items"
+              :key="item.id"
+              class="history-item"
+            >
+              <div class="history-item-left">
+                <div class="history-type" :class="item.type">
+                  {{ item.type === 'buy' ? '买入' : '卖出' }}
+                </div>
+                <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
+                <div class="history-detail">
+                  {{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}
+                </div>
+              </div>
+              <div class="history-item-right">
+                <div class="history-amount">{{ item.type === 'sell' ? '+' : '-' }}{{ formatMoney(item.amount) }}</div>
+                <div class="history-profit" :class="getChangeStatus(item.profit)">
+                  {{ item.profit >= 0 ? '+' : '' }}{{ formatMoney(item.profit) }}
+                </div>
+                <div class="history-rate" :class="getChangeStatus(item.profit)">
+                  {{ formatPercent(item.profitRate) }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <van-empty v-else description="暂无买卖记录" />
         </div>
       </div>
     </van-popup>
@@ -1066,6 +1155,7 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .col-change, .col-today, .col-profit {
@@ -1217,6 +1307,84 @@ function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
   border-radius: 4px;
   font-size: 12px;
   color: var(--color-primary);
+}
+
+.trade-history-dialog {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+}
+
+.history-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.history-summary-item {
+  padding: 10px 8px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  text-align: center;
+}
+
+.history-list {
+  padding: 8px 0;
+}
+
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.history-item-left {
+  flex: 1;
+}
+
+.history-type {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.history-type.buy {
+  color: var(--color-up);
+}
+
+.history-type.sell {
+  color: var(--color-down);
+}
+
+.history-meta,
+.history-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+.history-item-right {
+  text-align: right;
+}
+
+.history-amount {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.history-profit {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 3px;
+}
+
+.history-rate {
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 /* 调整成本弹窗 */
