@@ -74,6 +74,16 @@ const showTradeHistoryDialog = ref(false)
 const historyFundCode = ref('')
 const historyFundName = ref('')
 const showDetail = ref(true)
+const showTradeEditDialog = ref(false)
+const editTradeFormData = ref({
+  id: '',
+  type: 'buy' as 'buy' | 'sell',
+  amount: '',
+  shares: '',
+  nav: '',
+  date: '',
+  period: 'before_15' as 'before_15' | 'after_15'
+})
 
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
@@ -411,6 +421,100 @@ function openTradeHistoryDialog(code: string) {
   showTradeHistoryDialog.value = true
 }
 
+function openTradeEditDialog(item: {
+  id: string
+  type: 'buy' | 'sell'
+  amount: number
+  shares: number
+  nav: number
+  date: string
+  period: 'before_15' | 'after_15'
+}) {
+  editTradeFormData.value = {
+    id: item.id,
+    type: item.type,
+    amount: item.amount.toString(),
+    shares: item.shares.toString(),
+    nav: item.nav.toString(),
+    date: item.date,
+    period: item.period
+  }
+  showTradeEditDialog.value = true
+}
+
+async function submitTradeEdit() {
+  const nav = parseFloat(editTradeFormData.value.nav)
+  if (!nav || nav <= 0) {
+    showToast('请输入有效净值')
+    return
+  }
+  if (!editTradeFormData.value.date) {
+    showToast('请选择交易日期')
+    return
+  }
+
+  const payload: {
+    nav: number
+    date: string
+    period: 'before_15' | 'after_15'
+    amount?: number
+    shares?: number
+  } = {
+    nav,
+    date: editTradeFormData.value.date,
+    period: editTradeFormData.value.period
+  }
+
+  if (editTradeFormData.value.type === 'buy') {
+    const amount = parseFloat(editTradeFormData.value.amount)
+    if (!amount || amount <= 0) {
+      showToast('请输入有效买入金额')
+      return
+    }
+    payload.amount = amount
+  } else {
+    const shares = parseFloat(editTradeFormData.value.shares)
+    if (!shares || shares <= 0) {
+      showToast('请输入有效卖出份额')
+      return
+    }
+    payload.shares = shares
+  }
+
+  const ok = await holdingStore.updateTradeRecord(editTradeFormData.value.id, payload)
+  if (ok) {
+    showToast('交易记录已更新')
+    showTradeEditDialog.value = false
+    if (!holdingStore.getHoldingByCode(historyFundCode.value)) {
+      showTradeHistoryDialog.value = false
+      showToast('该基金持仓已清空')
+    }
+  } else {
+    showToast('更新失败')
+  }
+}
+
+async function deleteTradeRecord(id: string) {
+  try {
+    await showConfirmDialog({
+      title: '确认删除',
+      message: '确定删除这条交易记录吗？'
+    })
+    const ok = await holdingStore.deleteTradeRecord(id)
+    if (ok) {
+      showToast('交易记录已删除')
+      if (!holdingStore.getHoldingByCode(historyFundCode.value)) {
+        showTradeHistoryDialog.value = false
+        showToast('该基金持仓已清空')
+      }
+    } else {
+      showToast('删除失败')
+    }
+  } catch {
+    // 用户取消
+  }
+}
+
 function handleRouteActions() {
   const code = typeof route.query.code === 'string' ? route.query.code : ''
   const trade = typeof route.query.trade === 'string' ? route.query.trade : ''
@@ -734,32 +838,81 @@ function displayMoney(value: number | string | undefined): string {
           </div>
 
           <div v-if="tradeHistorySummary.items.length > 0" class="history-list">
-            <div
-              v-for="item in tradeHistorySummary.items"
-              :key="item.id"
-              class="history-item"
-            >
-              <div class="history-item-left">
-                <div class="history-type" :class="item.type">
-                  {{ item.type === 'buy' ? '买入' : '卖出' }}
+            <van-swipe-cell v-for="item in tradeHistorySummary.items" :key="item.id">
+              <div class="history-item">
+                <div class="history-item-left">
+                  <div class="history-type" :class="item.type">
+                    {{ item.type === 'buy' ? '买入' : '卖出' }}
+                  </div>
+                  <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
+                  <div class="history-detail">
+                    {{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}
+                  </div>
                 </div>
-                <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
-                <div class="history-detail">
-                  {{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}
-                </div>
-              </div>
-              <div class="history-item-right">
-                <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ displayMoney(item.amount) }}</div>
-                <div class="history-profit" :class="getChangeStatus(item.profit)">
-                  {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
-                </div>
-                <div class="history-rate" :class="getChangeStatus(item.profit)">
-                  {{ formatPercent(item.profitRate) }}
+                <div class="history-item-right">
+                  <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ displayMoney(item.amount) }}</div>
+                  <div class="history-profit" :class="getChangeStatus(item.profit)">
+                    {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
+                  </div>
+                  <div class="history-rate" :class="getChangeStatus(item.profit)">
+                    {{ formatPercent(item.profitRate) }}
+                  </div>
                 </div>
               </div>
-            </div>
+              <template #right>
+                <van-button square type="primary" text="修改" @click="openTradeEditDialog(item)" />
+                <van-button square type="danger" text="删除" @click="deleteTradeRecord(item.id)" />
+              </template>
+            </van-swipe-cell>
           </div>
           <van-empty v-else description="暂无买卖记录" />
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- 编辑交易记录弹窗 -->
+    <van-popup
+      v-model:show="showTradeEditDialog"
+      position="bottom"
+      round
+      :style="{ height: '55%' }"
+    >
+      <div class="add-dialog">
+        <div class="dialog-header">
+          <span>修改{{ editTradeFormData.type === 'buy' ? '买入' : '卖出' }}记录</span>
+          <van-icon name="cross" @click="showTradeEditDialog = false" />
+        </div>
+        <div class="dialog-content">
+          <van-field :model-value="`${historyFundName} (${historyFundCode})`" label="基金" readonly />
+          <van-field
+            v-if="editTradeFormData.type === 'buy'"
+            v-model="editTradeFormData.amount"
+            type="number"
+            label="买入金额"
+            placeholder="请输入金额（元）"
+          />
+          <van-field
+            v-else
+            v-model="editTradeFormData.shares"
+            type="number"
+            label="卖出份额"
+            placeholder="请输入份额"
+          />
+          <van-field v-model="editTradeFormData.nav" type="number" label="成交净值" placeholder="请输入成交净值" />
+          <van-field v-model="editTradeFormData.date" type="date" label="交易日期" />
+          <van-field label="交易时段">
+            <template #input>
+              <van-radio-group v-model="editTradeFormData.period" direction="horizontal">
+                <van-radio name="before_15">15:00前</van-radio>
+                <van-radio name="after_15">15:00后</van-radio>
+              </van-radio-group>
+            </template>
+          </van-field>
+        </div>
+        <div class="dialog-footer">
+          <van-button block type="primary" @click="submitTradeEdit">
+            保存修改
+          </van-button>
         </div>
       </div>
     </van-popup>

@@ -50,6 +50,14 @@ interface HoldingTradePnLRecord extends HoldingTradeRecord {
   mode: 'floating' | 'realized'
 }
 
+interface UpdateTradeRecordPayload {
+  date?: string
+  period?: 'before_15' | 'after_15'
+  nav?: number
+  amount?: number
+  shares?: number
+}
+
 const PENDING_TRADE_KEY = 'fund_pending_holding_trades'
 const HOLDING_TRADE_KEY = 'fund_holding_trade_records'
 
@@ -660,11 +668,114 @@ export const useHoldingStore = defineStore('holding', () => {
       })
   }
 
-  function deleteTradeRecord(id: string): boolean {
+  function recalculateHoldingFromTrades(code: string): void {
+    const records = getTradeRecordsByFund(code)
+    const currentHolding = getHoldingByCode(code)
+
+    if (records.length === 0) {
+      removeHolding(code)
+      return
+    }
+
+    let totalShares = 0
+    let totalCost = 0
+    let firstBuyDate = ''
+
+    for (const record of records) {
+      if (record.type === 'buy') {
+        totalShares += record.shares
+        totalCost += record.amount
+        if (!firstBuyDate || record.date < firstBuyDate) {
+          firstBuyDate = record.date
+        }
+      } else {
+        if (totalShares <= 0) continue
+        const soldShares = Math.min(totalShares, record.shares)
+        const ratio = soldShares / totalShares
+        totalCost = Math.max(0, totalCost - totalCost * ratio)
+        totalShares = Math.max(0, totalShares - soldShares)
+      }
+    }
+
+    if (totalShares <= 1e-6 || totalCost <= 1e-6) {
+      removeHolding(code)
+      return
+    }
+
+    const holding = currentHolding
+    const now = Date.now()
+    const buyDate = firstBuyDate || holding?.buyDate || todayStr()
+    const holdingDays = Math.max(0, Math.ceil((now - new Date(buyDate).getTime()) / (1000 * 60 * 60 * 24)))
+
+    const updated: HoldingRecord = {
+      code,
+      name: holding?.name || records[0]!.name,
+      shareClass: holding?.shareClass || 'A',
+      amount: totalCost,
+      shares: totalShares,
+      buyNetValue: totalCost / totalShares,
+      buyDate,
+      holdingDays,
+      createdAt: holding?.createdAt || records[0]!.createdAt || now,
+      buyFeeRate: holding?.buyFeeRate,
+      buyFeeDeducted: holding?.buyFeeDeducted,
+      buyFeeAmount: holding?.buyFeeAmount,
+      sellFeeRate: holding?.sellFeeRate,
+      serviceFeeRate: holding?.serviceFeeRate,
+      serviceFeeDeducted: holding?.serviceFeeDeducted,
+      lastFeeDate: holding?.lastFeeDate
+    }
+
+    updateHoldingRecord(updated)
+  }
+
+  async function deleteTradeRecord(id: string): Promise<boolean> {
     const index = tradeRecords.value.findIndex(t => t.id === id)
     if (index === -1) return false
+    const code = tradeRecords.value[index]!.code
     tradeRecords.value.splice(index, 1)
     saveHoldingTradeRecords(tradeRecords.value)
+    recalculateHoldingFromTrades(code)
+    await refreshEstimates()
+    return true
+  }
+
+  async function updateTradeRecord(id: string, updates: UpdateTradeRecordPayload): Promise<boolean> {
+    const index = tradeRecords.value.findIndex(t => t.id === id)
+    if (index === -1) return false
+
+    const current = tradeRecords.value[index]!
+    const nextType = current.type
+    const nextDate = normalizeDate(updates.date || current.date)
+    const nextPeriod = updates.period || current.period
+    const nextNav = updates.nav !== undefined ? updates.nav : current.nav
+    if (!nextDate || nextNav <= 0) return false
+
+    let nextAmount = current.amount
+    let nextShares = current.shares
+
+    if (nextType === 'buy') {
+      nextAmount = updates.amount !== undefined ? updates.amount : current.amount
+      if (nextAmount <= 0) return false
+      nextShares = nextAmount / nextNav
+    } else {
+      nextShares = updates.shares !== undefined ? updates.shares : current.shares
+      if (nextShares <= 0) return false
+      nextAmount = nextShares * nextNav
+    }
+
+    tradeRecords.value[index] = {
+      ...current,
+      date: nextDate,
+      period: nextPeriod,
+      nav: nextNav,
+      amount: nextAmount,
+      shares: nextShares
+    }
+    saveHoldingTradeRecords(tradeRecords.value)
+
+    recalculateHoldingFromTrades(current.code)
+    await refreshEstimates()
     return true
   }
 
@@ -754,6 +865,7 @@ export const useHoldingStore = defineStore('holding', () => {
     addSellTrade,
     getTradeRecordsByFund,
     deleteTradeRecord,
+    updateTradeRecord,
     getTradePnLSummaryByFund,
     removeHolding,
     hasHolding,

@@ -557,24 +557,6 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   return period === 'after_15' ? '15:00后' : '15:00前'
 }
 
-async function deleteTradeRecord(id: string) {
-  try {
-    await showConfirmDialog({
-      title: '删除交易',
-      message: '确定删除这条交易记录吗？'
-    })
-    const ok = holdingStore.deleteTradeRecord(id)
-    if (ok) {
-      showToast('已删除')
-      await holdingStore.refreshEstimates()
-    } else {
-      showToast('删除失败')
-    }
-  } catch {
-    // 用户取消
-  }
-}
-
 // [WHAT] 跳转同类基金
 function goToSimilarFund(code: string) {
   if (code === fundCode.value) {
@@ -1383,23 +1365,18 @@ function formatPercent(num: number): string {
           </div>
 
           <div v-if="tradeHistorySummary.items.length > 0" class="history-list">
-            <van-swipe-cell v-for="item in tradeHistorySummary.items" :key="item.id">
-              <div class="history-item">
-                <div class="history-item-left">
-                  <div class="history-type" :class="item.type">{{ item.type === 'buy' ? '买入' : '卖出' }}</div>
-                  <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
-                  <div class="history-detail">{{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}</div>
-                </div>
-                <div class="history-item-right">
-                  <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ formatNum(item.amount) }}</div>
-                  <div class="history-profit" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatNum(item.profit) }}</div>
-                  <div class="history-rate" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatPercent(item.profitRate) }}</div>
-                </div>
+            <div v-for="item in tradeHistorySummary.items" :key="item.id" class="history-item">
+              <div class="history-item-left">
+                <div class="history-type" :class="item.type">{{ item.type === 'buy' ? '买入' : '卖出' }}</div>
+                <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
+                <div class="history-detail">{{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}</div>
               </div>
-              <template #right>
-                <van-button square type="danger" text="删除" @click="deleteTradeRecord(item.id)" />
-              </template>
-            </van-swipe-cell>
+              <div class="history-item-right">
+                <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ formatNum(item.amount) }}</div>
+                <div class="history-profit" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatNum(item.profit) }}</div>
+                <div class="history-rate" :class="item.profit >= 0 ? 'up' : 'down'">{{ formatPercent(item.profitRate) }}</div>
+              </div>
+            </div>
           </div>
           <van-empty v-else description="暂无交易记录" />
         </div>
