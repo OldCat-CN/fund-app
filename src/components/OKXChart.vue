@@ -76,61 +76,29 @@ const filteredData = computed(() => {
   const now = new Date()
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   
-  // [WHY] 当日模式：显示昨日收盘 + 今日实时估值
-  // [WHAT] 基金没有分时API，当日模式只显示2个数据点
+  // [WHAT] 当日模式：按实时采样分时绘制
   if (showIntradayChart.value) {
-    // [WHY] 获取所有历史数据，取最近的作为昨日收盘
-    const sortedData = [...chartData.value]
-      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-    
-    if (sortedData.length === 0) {
-      return [{
-        time: today,
-        value: props.lastClose || props.realtimeValue || 1,
-        change: 0,
-        volume: 50
-      }]
+    if (intradayData.value.length > 0) {
+      const first = intradayData.value[0]!.value
+      return intradayData.value.map((p, i) => {
+        const base = first || p.value || 1
+        const change = ((p.value - base) / base) * 100
+        return {
+          time: p.time,
+          value: p.value,
+          change: Number(change.toFixed(2)),
+          volume: p.volume || (80 + i)
+        }
+      })
     }
-    
-    // [WHAT] 获取最后一个交易日数据（昨日收盘）
-    const lastTradingDay = sortedData[sortedData.length - 1]!
-    const hasTodayData = lastTradingDay.time === today
-    
-    // [WHY] 如果最后数据就是今天，取前一天作为昨日
-    const yesterdayData = hasTodayData && sortedData.length > 1 
-      ? sortedData[sortedData.length - 2]! 
-      : lastTradingDay
-    
-    let data: typeof sortedData = [{
-      time: yesterdayData.time,
-      value: yesterdayData.value,
-      change: yesterdayData.change,
+
+    const fallbackValue = props.realtimeValue || props.lastClose || 1
+    return [{
+      time: `${today} 15:00:00`,
+      value: fallbackValue,
+      change: 0,
       volume: 60
     }]
-    
-    // [WHY] 添加今日实时数据点
-    const hasRealtimeData = props.realtimeValue > 0
-    
-    if (hasRealtimeData) {
-      const realtimeChange = ((props.realtimeValue - yesterdayData.value) / yesterdayData.value) * 100
-      
-      data = [...data, {
-        time: today,
-        value: props.realtimeValue,
-        change: props.realtimeChange || Number(realtimeChange.toFixed(2)),
-        volume: 80
-      }]
-    } else if (hasTodayData) {
-      // [WHAT] 没有实时数据但有今日净值，使用今日净值
-      data = [...data, {
-        time: lastTradingDay.time,
-        value: lastTradingDay.value,
-        change: lastTradingDay.change,
-        volume: 80
-      }]
-    }
-    
-    return data
   }
   
   // [WHY] 其他情况统一使用K线数据
@@ -171,6 +139,11 @@ const filteredData = computed(() => {
       }]
     }
   }
+
+  // [WHAT] 5日模式固定最近5个交易日
+  if (currentPeriod === '5d' && data.length > 5) {
+    data = data.slice(-5)
+  }
   
   return data
 })
@@ -201,7 +174,9 @@ function addIntradayPoint(value: number) {
   if (!value || value <= 0) return
   
   const now = new Date()
-  const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const clockStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+  const timeStr = `${dateStr} ${clockStr}`
   
   if (baseValue.value === 0) {
     baseValue.value = props.lastClose || value
@@ -252,7 +227,8 @@ async function loadData() {
 }
 
 function getChartPadding() {
-  return { top: 15, right: 16, bottom: 25, left: 58 }
+  // [WHY] 右侧预留空间，避免最右点标签被裁剪
+  return { top: 15, right: 72, bottom: 25, left: 58 }
 }
 
 function updateHoverByClientX(clientX: number) {
@@ -288,6 +264,9 @@ function clearHover() {
 
 function formatHoverTimeLabel(time: string): string {
   if (!time) return '--'
+  if (isIntradayMode.value && time.includes(' ')) {
+    return (time.split(' ')[1] || '--').slice(0, 8)
+  }
   const datePart = time.split(' ')[0] || time
   const parts = datePart.split('-')
   if (parts.length >= 3) return `${parts[1]}-${parts[2]}`
