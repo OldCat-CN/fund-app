@@ -10,7 +10,8 @@ import { useHoldingStore } from '@/stores/holding'
 import { fetchStockHoldings, detectShareClass } from '@/api/fund'
 import { 
   fetchFundEstimateFast, fetchFundAccurateData, fetchIndustryAllocation, fetchAssetAllocation, fetchFundRating,
-  type IndustryAllocation, type AssetAllocation, type FundRating, type FundAccurateData
+  calculatePeriodReturns,
+  type IndustryAllocation, type AssetAllocation, type FundRating, type FundAccurateData, type PeriodReturn
 } from '@/api/fundFast'
 import { 
   fetchPeriodReturnExt, fetchSimilarFunds, fetchSectorFunds, 
@@ -42,6 +43,8 @@ const fundInfo = ref<FundEstimate | null>(null)
 const accurateData = ref<FundAccurateData | null>(null)
 const stockHoldings = ref<StockHolding[]>([])
 const periodReturns = ref<PeriodReturnExt[]>([])
+const periodReturnsBasic = ref<PeriodReturn[]>([])
+const inceptionReturn = ref<number | null>(null)
 const similarFunds = ref<SimilarFund[]>([])
 const sectorInfo = ref<SectorInfo | null>(null)
 const isLoading = ref(true)
@@ -157,6 +160,8 @@ watch(fundCode, async (newCode, oldCode) => {
     fundInfo.value = null
     stockHoldings.value = []
     periodReturns.value = []
+    periodReturnsBasic.value = []
+    inceptionReturn.value = null
     similarFunds.value = []
     dividendRecords.value = []
     fundFees.value = null
@@ -270,6 +275,16 @@ async function loadFundData() {
     // 后台加载其他数据
     fetchStockHoldings(fundCode.value).then(h => stockHoldings.value = h).catch(() => {})
     fetchPeriodReturnExt(fundCode.value).then(r => periodReturns.value = r).catch(() => {})
+    calculatePeriodReturns(fundCode.value).then(r => periodReturnsBasic.value = r).catch(() => {})
+    fetchNetValueHistoryFast(fundCode.value, 5000).then(history => {
+      if (history.length >= 2) {
+        const latest = history[0]!.netValue
+        const earliest = history[history.length - 1]!.netValue
+        if (earliest > 0) {
+          inceptionReturn.value = ((latest - earliest) / earliest) * 100
+        }
+      }
+    }).catch(() => {})
     fetchSimilarFunds(fundCode.value).then(f => similarFunds.value = f).catch(() => {})
     fetchSectorFunds().then(s => { if (s.length > 0) sectorInfo.value = s[0]! }).catch(() => {})
     
@@ -299,14 +314,34 @@ const priceChangePercent = computed(() => {
 const isUp = computed(() => priceChangePercent.value >= 0)
 
 function getPeriodFundReturn(period: string): number | null {
-  const item = periodReturns.value.find(p => p.period === period)
-  if (!item) return null
-  return Number.isFinite(item.fundReturn) ? item.fundReturn : null
+  const ext = periodReturns.value.find(p => p.period === period)
+  if (ext && Number.isFinite(ext.fundReturn)) {
+    return ext.fundReturn
+  }
+
+  const periodMap: Record<string, string> = {
+    '1m': 'Y',
+    '3m': '3Y',
+    '1y': '1N'
+  }
+  const basicKey = periodMap[period]
+  if (basicKey) {
+    const basic = periodReturnsBasic.value.find(p => p.period === basicKey)
+    if (basic && Number.isFinite(basic.change)) {
+      return basic.change
+    }
+  }
+
+  if (period === 'all' && inceptionReturn.value !== null && Number.isFinite(inceptionReturn.value)) {
+    return inceptionReturn.value
+  }
+  return null
 }
 
 const monthReturn = computed(() => getPeriodFundReturn('1m'))
 const quarterReturn = computed(() => getPeriodFundReturn('3m'))
 const yearReturn = computed(() => getPeriodFundReturn('1y'))
+const allReturn = computed(() => getPeriodFundReturn('all'))
 
 
 // [WHAT] 加载趋势预测
@@ -680,6 +715,12 @@ function formatPercent(num: number): string {
             <div class="metric-label">近1年涨跌幅</div>
             <div class="metric-value" :class="(yearReturn ?? 0) >= 0 ? 'up' : 'down'">
               {{ yearReturn !== null ? formatPercent(yearReturn) : '--' }}
+            </div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">成立来涨跌幅</div>
+            <div class="metric-value" :class="(allReturn ?? 0) >= 0 ? 'up' : 'down'">
+              {{ allReturn !== null ? formatPercent(allReturn) : '--' }}
             </div>
           </div>
         </div>

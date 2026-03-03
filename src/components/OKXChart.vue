@@ -38,7 +38,7 @@ const periodReturns = ref<PeriodReturn[]>([])
 const isLoading = ref(false)
 const activePeriod = ref('7d') // 默认显示7日走势
 const canvasRef = ref<HTMLCanvasElement | null>(null)
-const chartMode = ref<'net' | 'change'>('net')
+const chartMode = ref<'net' | 'change'>('change')
 const hoveredIndex = ref<number | null>(null)
 
 // [WHAT] 分时数据
