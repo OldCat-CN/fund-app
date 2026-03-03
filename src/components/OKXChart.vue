@@ -4,7 +4,7 @@
 // [HOW] Canvas绘制，requestAnimationFrame实现流畅实时动画
 
 import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
-import { fetchSimpleKLineData, calculatePeriodReturns, clearFundCache, type SimpleKLineData, type PeriodReturn } from '@/api/fundFast'
+import { fetchSimpleKLineData, clearFundCache, type SimpleKLineData } from '@/api/fundFast'
 import { useThemeStore } from '@/stores/theme'
 import { isTradingTime } from '@/api/tiantianApi'
 
@@ -34,7 +34,6 @@ function getThemeColors() {
 
 // ========== 状态 ==========
 const chartData = ref<SimpleKLineData[]>([])
-const periodReturns = ref<PeriodReturn[]>([])
 const isLoading = ref(false)
 const activePeriod = ref('7d') // 默认显示7日走势
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -100,33 +99,44 @@ const filteredData = computed(() => {
     }]
   }
   
-  // [WHY] 其他情况统一使用K线数据
+  // [WHY] 其他情况统一使用确认净值数据绘制
   const period = periods.find(p => p.key === currentPeriod)
   const days = period?.days || 7
-  
-  const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
-  
-  // [WHY] 先按时间排序，再过滤指定天数范围
-  let data = [...chartData.value]
+
+  const sortedData = [...chartData.value]
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-    .filter(item => new Date(item.time) >= startDate)
     .map((item, i) => ({ 
       ...item, 
       volume: 50 + Math.abs(item.change) * 30 + (i % 5) * 10
     }))
-  
-  
-  // [WHY] 实时更新当日K线数据点
+
+  if (sortedData.length === 0) return []
+
+  // [WHAT] 与核心指标一致：终点取最新确认净值日，起点按周期回溯并取前一交易日
+  const endRecord = sortedData[sortedData.length - 1]!
+  const endDate = new Date(endRecord.time)
+  const targetDate = new Date(endDate)
+  targetDate.setDate(targetDate.getDate() - days)
+  const targetMs = targetDate.getTime()
+
+  let startIndex = 0
+  for (let i = sortedData.length - 1; i >= 0; i--) {
+    const t = new Date(sortedData[i]!.time).getTime()
+    if (!Number.isNaN(t) && t <= targetMs) {
+      startIndex = i
+      break
+    }
+  }
+  let data = sortedData.slice(startIndex)
+
+  // [WHAT] 在确认净值区间末尾补一个今天的估值预测点，起点保持不变
   if (props.realtimeValue > 0 && data.length > 0) {
-    const lastIndex = data.length - 1
-    const lastItem = data[lastIndex]!
-    
-    if (lastItem.time === today) {
-      data = [...data.slice(0, lastIndex), {
-        ...lastItem,
+    const last = data[data.length - 1]!
+    if (last.time === today) {
+      data = [...data.slice(0, -1), {
+        ...last,
         value: props.realtimeValue,
-        change: props.realtimeChange,
-        volume: lastItem.volume
+        change: props.realtimeChange
       }]
     } else {
       data = [...data, {
@@ -138,11 +148,6 @@ const filteredData = computed(() => {
     }
   }
 
-  // [WHAT] 7日模式固定最近7个交易日
-  if (currentPeriod === '7d' && data.length > 7) {
-    data = data.slice(-7)
-  }
-  
   return data
 })
 
@@ -206,13 +211,9 @@ async function loadData() {
   try {
     clearFundCache(props.fundCode)
     
-    const [kline, returns] = await Promise.all([
-      fetchSimpleKLineData(props.fundCode, 400),
-      calculatePeriodReturns(props.fundCode)
-    ])
+    const kline = await fetchSimpleKLineData(props.fundCode, 400)
     
     chartData.value = kline
-    periodReturns.value = returns
     
     
     await nextTick()
@@ -711,12 +712,6 @@ function drawChart() {
   }
 }
 
-function formatVolume(v: number): string {
-  if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M'
-  if (v >= 1000) return (v / 1000).toFixed(1) + 'K'
-  return v.toFixed(0)
-}
-
 // ========== 事件处理 ==========
 function selectPeriod(key: string) {
   // [WHY] 先停止动画，避免旧数据干扰
@@ -899,21 +894,6 @@ onUnmounted(() => {
       ></canvas>
     </div>
 
-    <!-- 成交量标签 -->
-    <div class="volume-label">
-      <span>成交量(Volume)</span>
-      <span class="volume-value">{{ formatVolume((filteredData[filteredData.length - 1] as any)?.volume || 0) }}</span>
-    </div>
-
-    <!-- 阶段涨幅 -->
-    <div v-if="periodReturns.length > 0" class="returns-bar">
-      <div v-for="r in periodReturns" :key="r.period" class="return-item">
-        <span class="return-label">{{ r.label }}</span>
-        <span class="return-value" :class="r.change >= 0 ? 'up' : 'down'">
-          {{ r.change >= 0 ? '+' : '' }}{{ r.change.toFixed(2) }}%
-        </span>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -1103,54 +1083,6 @@ onUnmounted(() => {
   height: 100%;
 }
 
-/* 成交量标签 */
-.volume-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border-top: 1px solid var(--border-color);
-}
-
-.volume-value {
-  font-family: -apple-system, 'SF Mono', 'Roboto Mono', monospace;
-  color: var(--text-primary);
-}
-
-/* 阶段涨幅 */
-.returns-bar {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
-  gap: 8px;
-  padding: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.return-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-}
-
-.return-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.return-value {
-  font-size: 14px;
-  font-weight: 600;
-  font-family: -apple-system, 'SF Mono', 'Roboto Mono', monospace;
-}
-
-/* [WHY] 红涨绿跌 */
-.return-value.up { color: var(--color-up); }
-.return-value.down { color: var(--color-down); }
-
 /* ========== 响应式适配 ========== */
 @media screen and (max-width: 375px) {
   /* 小屏手机（iPhone SE等） */
@@ -1169,9 +1101,6 @@ onUnmounted(() => {
     height: 200px;
   }
   
-  .returns-bar {
-    grid-template-columns: repeat(3, 1fr);
-  }
 }
 
 @media screen and (min-width: 414px) {

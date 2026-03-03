@@ -50,9 +50,11 @@ const stockHoldings = ref<StockHolding[]>([])
 const periodReturns = ref<PeriodReturnExt[]>([])
 const periodReturnsBasic = ref<PeriodReturn[]>([])
 const inceptionReturn = ref<number | null>(null)
-const confirmedPeriodReturns = ref<Record<'1m' | '3m' | '1y', number | null>>({
+const confirmedPeriodReturns = ref<Record<'1w' | '1m' | '3m' | '6m' | '1y', number | null>>({
+  '1w': null,
   '1m': null,
   '3m': null,
+  '6m': null,
   '1y': null
 })
 const similarFunds = ref<SimilarFund[]>([])
@@ -172,7 +174,7 @@ watch(fundCode, async (newCode, oldCode) => {
     periodReturns.value = []
     periodReturnsBasic.value = []
     inceptionReturn.value = null
-    confirmedPeriodReturns.value = { '1m': null, '3m': null, '1y': null }
+    confirmedPeriodReturns.value = { '1w': null, '1m': null, '3m': null, '6m': null, '1y': null }
     similarFunds.value = []
     dividendRecords.value = []
     fundFees.value = null
@@ -326,7 +328,7 @@ const priceChangePercent = computed(() => {
 const isUp = computed(() => priceChangePercent.value >= 0)
 
 function getPeriodFundReturn(period: string): number | null {
-  if (period === '1m' || period === '3m' || period === '1y') {
+  if (period === '1w' || period === '1m' || period === '3m' || period === '6m' || period === '1y') {
     const confirmed = confirmedPeriodReturns.value[period]
     if (confirmed !== null && Number.isFinite(confirmed)) {
       return confirmed
@@ -339,8 +341,10 @@ function getPeriodFundReturn(period: string): number | null {
   }
 
   const periodMap: Record<string, string> = {
+    '1w': 'Z',
     '1m': 'Y',
     '3m': '3Y',
+    '6m': '6Y',
     '1y': '1N'
   }
   const basicKey = periodMap[period]
@@ -357,13 +361,15 @@ function getPeriodFundReturn(period: string): number | null {
   return null
 }
 
+const weekReturn = computed(() => getPeriodFundReturn('1w'))
 const monthReturn = computed(() => getPeriodFundReturn('1m'))
 const quarterReturn = computed(() => getPeriodFundReturn('3m'))
+const halfYearReturn = computed(() => getPeriodFundReturn('6m'))
 const yearReturn = computed(() => getPeriodFundReturn('1y'))
 const allReturn = computed(() => getPeriodFundReturn('all'))
 
-function calculateConfirmedPeriodReturns(history: ConfirmedNavRecord[]): Record<'1m' | '3m' | '1y', number | null> {
-  const empty = { '1m': null, '3m': null, '1y': null }
+function calculateConfirmedPeriodReturns(history: ConfirmedNavRecord[]): Record<'1w' | '1m' | '3m' | '6m' | '1y', number | null> {
+  const empty = { '1w': null, '1m': null, '3m': null, '6m': null, '1y': null }
   if (!history || history.length < 2) return empty
 
   // fetchNetValueHistoryFast 返回最新在前，均为已确认净值
@@ -374,13 +380,15 @@ function calculateConfirmedPeriodReturns(history: ConfirmedNavRecord[]): Record<
   const endDate = new Date(end.date)
   if (Number.isNaN(endDate.getTime()) || end.netValue <= 0) return empty
 
-  const byKey: Array<{ key: '1m' | '3m' | '1y'; days: number }> = [
+  const byKey: Array<{ key: '1w' | '1m' | '3m' | '6m' | '1y'; days: number }> = [
+    { key: '1w', days: 7 },
     { key: '1m', days: 30 },
     { key: '3m', days: 90 },
+    { key: '6m', days: 180 },
     { key: '1y', days: 365 }
   ]
 
-  const result: Record<'1m' | '3m' | '1y', number | null> = { ...empty }
+  const result: Record<'1w' | '1m' | '3m' | '6m' | '1y', number | null> = { ...empty }
 
   for (const { key, days } of byKey) {
     const targetDate = new Date(endDate)
@@ -745,20 +753,30 @@ function formatPercent(num: number): string {
       
       <!-- 核心指标 -->
       <div class="core-metrics" v-if="!isLoading">
-        <div class="main-change">
-          <div class="change-label">当日涨幅 {{ fundInfo?.gztime?.slice(5, 10) || '--' }}</div>
-          <div class="change-value" :class="isUp ? 'up' : 'down'">
-            {{ formatPercent(priceChangePercent) }}
+        <div class="main-row">
+          <div class="main-change">
+            <div class="change-label">当日涨幅 {{ fundInfo?.gztime?.slice(5, 10) || '--' }}</div>
+            <div class="change-value" :class="isUp ? 'up' : 'down'">
+              {{ formatPercent(priceChangePercent) }}
+            </div>
+          </div>
+          <div class="side-metrics">
+            <div class="side-item">
+              <div class="side-label">估算净值</div>
+              <div class="side-value">{{ fundInfo?.gsz || '--' }}</div>
+            </div>
+            <div class="side-item">
+              <div class="side-label">昨日净值</div>
+              <div class="side-value">{{ fundInfo?.dwjz || '--' }}</div>
+            </div>
           </div>
         </div>
         <div class="sub-metrics">
           <div class="metric-item">
-            <div class="metric-label">估算净值</div>
-            <div class="metric-value">{{ fundInfo?.gsz || '--' }}</div>
-          </div>
-          <div class="metric-item">
-            <div class="metric-label">昨日净值</div>
-            <div class="metric-value">{{ fundInfo?.dwjz || '--' }}</div>
+            <div class="metric-label">近1周涨跌幅</div>
+            <div class="metric-value" :class="(weekReturn ?? 0) >= 0 ? 'up' : 'down'">
+              {{ weekReturn !== null ? formatPercent(weekReturn) : '--' }}
+            </div>
           </div>
           <div class="metric-item">
             <div class="metric-label">近1月涨跌幅</div>
@@ -770,6 +788,12 @@ function formatPercent(num: number): string {
             <div class="metric-label">近3月涨跌幅</div>
             <div class="metric-value" :class="(quarterReturn ?? 0) >= 0 ? 'up' : 'down'">
               {{ quarterReturn !== null ? formatPercent(quarterReturn) : '--' }}
+            </div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">近6月涨跌幅</div>
+            <div class="metric-value" :class="(halfYearReturn ?? 0) >= 0 ? 'up' : 'down'">
+              {{ halfYearReturn !== null ? formatPercent(halfYearReturn) : '--' }}
             </div>
           </div>
           <div class="metric-item">
@@ -1385,6 +1409,7 @@ function formatPercent(num: number): string {
     <!-- 更多操作 -->
     <van-action-sheet
       v-model:show="showMoreActions"
+      class-name="detail-more-sheet"
       :actions="moreActionOptions.map(item => ({ name: item.name }))"
       cancel-text="取消"
       close-on-click-action
@@ -1608,8 +1633,16 @@ function formatPercent(num: number): string {
   padding: 40px;
 }
 
+.main-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 138px;
+  gap: 12px;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
 .main-change {
-  margin-bottom: 16px;
+  min-width: 0;
 }
 
 .change-label {
@@ -1631,6 +1664,34 @@ function formatPercent(num: number): string {
 
 .change-value.down {
   color: #67c23a;
+}
+
+.side-metrics {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 8px;
+}
+
+.side-item {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.side-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.side-value {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'DIN Alternate', -apple-system, monospace;
+  color: var(--text-primary);
 }
 
 .sub-metrics {
@@ -1666,6 +1727,29 @@ function formatPercent(num: number): string {
 
 .sub-metrics .metric-value.down {
   color: #67c23a;
+}
+
+:deep(.detail-more-sheet .van-action-sheet__item),
+:deep(.detail-more-sheet .van-action-sheet__cancel) {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+:deep(.detail-more-sheet .van-action-sheet__item:active),
+:deep(.detail-more-sheet .van-action-sheet__cancel:active) {
+  background: var(--bg-tertiary);
+}
+
+:deep(.detail-more-sheet .van-action-sheet__gap) {
+  background: var(--bg-primary);
+}
+
+:deep(.detail-more-sheet .van-action-sheet__item:nth-child(1)) {
+  color: var(--color-up);
+}
+
+:deep(.detail-more-sheet .van-action-sheet__item:nth-child(2)) {
+  color: var(--color-down);
 }
 
 /* ========== 持仓数据区 ========== */
