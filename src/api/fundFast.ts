@@ -1065,6 +1065,8 @@ export interface AssetAllocation {
   bond: number      // 债券占比 %
   cash: number      // 现金占比 %
   other: number     // 其他占比 %
+  netAsset: number  // 净资产（亿元）
+  reportDate: string // 披露日期 YYYY-MM-DD
 }
 
 /**
@@ -1179,7 +1181,11 @@ export async function fetchAssetAllocation(code: string): Promise<AssetAllocatio
           stock: parseFloat(getSeries('股票占净比').toFixed(2)),
           bond: parseFloat(getSeries('债券占净比').toFixed(2)),
           cash: parseFloat(getSeries('现金占净比').toFixed(2)),
-          other: parseFloat(getSeries('其他占净比').toFixed(2))
+          other: parseFloat(getSeries('其他占净比').toFixed(2)),
+          netAsset: parseFloat(getSeries('净资产').toFixed(4)),
+          reportDate: Array.isArray(data.categories) && data.categories.length > 0
+            ? String(data.categories[data.categories.length - 1])
+            : ''
         }
         
         cache.set(cacheKey, asset, CACHE_TTL.FUND_INFO)

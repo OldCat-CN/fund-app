@@ -129,6 +129,10 @@ export interface StockHolding {
   stockCode: string
   /** 股票名称 */
   stockName: string
+  /** 所属板块 */
+  sector?: string
+  /** 当日涨跌幅（%） */
+  dayChange?: number
   /** 持仓占比（%） */
   holdingRatio: number
   /** 持仓市值（万元） */

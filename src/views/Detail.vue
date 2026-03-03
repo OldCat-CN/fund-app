@@ -852,7 +852,7 @@ function selectAssetItem(name: string) {
 }
 
 const assetCenterNetAsset = computed(() => {
-  const netAsset = fundDetailInfo.value?.scale || 0
+  const netAsset = assetAllocation.value?.netAsset || 0
   if (!Number.isFinite(netAsset) || netAsset <= 0) return '--'
   return formatAssetScale(netAsset)
 })
@@ -863,6 +863,17 @@ function formatAssetScale(scale: number): string {
   }
   return `${scale.toFixed(2)}亿`
 }
+
+const assetDataPeriodLabel = computed(() => {
+  const date = assetAllocation.value?.reportDate
+  if (!date) return '--'
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!m) return date
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const quarter = month <= 3 ? 1 : month <= 6 ? 2 : month <= 9 ? 3 : 4
+  return `${year}年Q${quarter}`
+})
 
 // [WHAT] 打开公告链接
 function openAnnouncement(url: string) {
@@ -1347,6 +1358,7 @@ function formatPercent(num: number): string {
     <div class="info-section" v-if="assetAllocation">
       <div class="section-header">
         <span>资产配置</span>
+        <span class="section-tip">{{ assetDataPeriodLabel }}</span>
       </div>
       <div class="asset-chart" v-if="assetPieData.length > 0">
         <div class="asset-pie-wrap">
@@ -1399,19 +1411,29 @@ function formatPercent(num: number): string {
         </span>
       </div>
       <div v-if="stockHoldings.length > 0" class="holdings-list">
+        <div class="holding-header-row">
+          <span class="col-name">股票名称</span>
+          <span class="col-change">涨跌幅</span>
+          <span class="col-ratio">占比</span>
+          <span class="col-diff">较上期</span>
+        </div>
         <div 
           v-for="(stock, idx) in stockHoldings" 
-          :key="idx"
+          :key="stock.stockCode + idx"
           class="holding-item"
         >
-          <div class="holding-rank">{{ idx + 1 }}</div>
-          <div class="holding-info">
+          <div class="holding-main">
             <div class="holding-name">{{ stock.stockName }}</div>
-            <div class="holding-code">{{ stock.stockCode }}</div>
+            <div class="holding-sub">{{ stock.sector || stock.stockCode }}</div>
           </div>
-          <div class="holding-ratio">
-            <div class="ratio-value">{{ stock.holdingRatio.toFixed(2) }}%</div>
-            <div class="ratio-label">持仓占比</div>
+          <div class="holding-col change" :class="(stock.dayChange || 0) >= 0 ? 'up' : 'down'">
+            {{ stock.dayChange !== undefined ? formatPercent(stock.dayChange) : '--' }}
+          </div>
+          <div class="holding-col ratio">
+            {{ stock.holdingRatio.toFixed(2) }}%
+          </div>
+          <div class="holding-col diff" :class="String(stock.changeFromLast).startsWith('-') ? 'down' : 'up'">
+            {{ stock.changeFromLast || '--' }}
           </div>
         </div>
       </div>
@@ -2341,8 +2363,24 @@ function formatPercent(num: number): string {
   padding: 8px 16px 12px;
 }
 
+.holding-header-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 0.9fr 0.8fr 0.9fr;
+  gap: 8px;
+  padding: 2px 0 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.holding-header-row span:not(.col-name) {
+  text-align: right;
+}
+
 .holding-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 0.9fr 0.8fr 0.9fr;
+  gap: 8px;
   align-items: center;
   padding: 12px 0;
   border-bottom: 1px solid var(--border-color);
@@ -2352,69 +2390,47 @@ function formatPercent(num: number): string {
   border-bottom: none;
 }
 
-.holding-rank {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 12px;
-}
-
-.holding-item:nth-child(1) .holding-rank {
-  background: #ff6b6b;
-  color: white;
-}
-
-.holding-item:nth-child(2) .holding-rank {
-  background: #ffa726;
-  color: white;
-}
-
-.holding-item:nth-child(3) .holding-rank {
-  background: #ffca28;
-  color: white;
-}
-
-.holding-info {
-  flex: 1;
+.holding-main {
   min-width: 0;
 }
 
 .holding-name {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.holding-code {
+.holding-sub {
+  margin-top: 3px;
   font-size: 11px;
   color: var(--text-secondary);
-  margin-top: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.holding-ratio {
+.holding-col {
   text-align: right;
+  font-size: 13px;
+  font-family: 'DIN Alternate', -apple-system, monospace;
+  color: var(--text-primary);
 }
 
-.ratio-value {
-  font-size: 15px;
+.holding-col.change,
+.holding-col.diff {
   font-weight: 600;
-  color: var(--color-primary);
 }
 
-.ratio-label {
-  font-size: 10px;
-  color: var(--text-secondary);
-  margin-top: 2px;
+.holding-col.up {
+  color: var(--color-up);
+}
+
+.holding-col.down {
+  color: var(--color-down);
 }
 
 .stock-api-status {

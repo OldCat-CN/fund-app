@@ -451,16 +451,38 @@ export async function fetchStockHoldings(code: string): Promise<StockHolding[]> 
       reject(new Error('获取重仓股超时'))
     }, 15000)
 
-    ;(window as any)[callbackName] = (data: any) => {
+    ;(window as any)[callbackName] = async (data: any) => {
       cleanup()
       if (!data || !data.content) {
         resolve([])
         return
       }
-      // [WHAT] 解析 HTML 格式的返回数据
-      // 数据格式是 HTML 表格，需要解析
-      const holdings = parseStockHoldingsHtml(data.content)
-      resolve(holdings)
+      try {
+        const parsed = parseStockHoldingsWithPeriods(data.content)
+        if (parsed.current.length === 0) {
+          resolve([])
+          return
+        }
+
+        const prevMap = new Map(parsed.previous.map(item => [item.stockCode, item.holdingRatio]))
+        const secids = parsed.current.map(item => toSecid(item.stockCode))
+        const quotes = await fetchStockQuotes(secids)
+
+        const merged = parsed.current.map(item => {
+          const quote = quotes.get(item.stockCode)
+          const prevRatio = prevMap.get(item.stockCode)
+          const diff = prevRatio === undefined ? null : item.holdingRatio - prevRatio
+          return {
+            ...item,
+            sector: quote?.sector || '--',
+            dayChange: quote?.dayChange,
+            changeFromLast: diff === null ? '--' : `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`
+          }
+        })
+        resolve(merged)
+      } catch {
+        resolve(parseStockHoldingsHtml(data.content))
+      }
     }
 
     function cleanup() {
@@ -484,6 +506,122 @@ export async function fetchStockHoldings(code: string): Promise<StockHolding[]> 
   })
 }
 
+interface ParsedHoldingPeriods {
+  current: StockHolding[]
+  previous: StockHolding[]
+}
+
+function parseStockHoldingsWithPeriods(html: string): ParsedHoldingPeriods {
+  const sections: Array<{ date: string; list: StockHolding[] }> = []
+  const sectionRegex = /截止至：<font class='px12'>([^<]+)<\/font>[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/gi
+  let match: RegExpExecArray | null
+  while ((match = sectionRegex.exec(html)) !== null) {
+    const date = match[1] || ''
+    const tbody = match[2] || ''
+    const list = parseHoldingsFromTbody(tbody)
+    if (list.length > 0) sections.push({ date, list })
+  }
+
+  sections.sort((a, b) => b.date.localeCompare(a.date))
+  const current = sections[0]?.list || []
+  const previous = sections[1]?.list || []
+  return { current, previous }
+}
+
+function parseHoldingsFromTbody(tbody: string): StockHolding[] {
+  const list: StockHolding[] = []
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
+  let row: RegExpExecArray | null
+  while ((row = rowRegex.exec(tbody)) !== null) {
+    const tdsRaw: string[] = []
+    const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi
+    let td: RegExpExecArray | null
+    while ((td = tdRegex.exec(row[1] || '')) !== null) {
+      tdsRaw.push(td[1] || '')
+    }
+    if (tdsRaw.length < 3) continue
+    const tds = tdsRaw.map(toPlainText)
+    const stockCode = (tds[1] || '').match(/\d{6}/)?.[0] || ''
+    const stockName = tds[2] || ''
+    const ratioText = tds.find(v => v.includes('%')) || ''
+    const holdingRatio = parseFloat(ratioText.replace('%', '').replace(/,/g, '')) || 0
+    const holdingAmount = (tds[8] || '0').replace(/,/g, '')
+    if (!stockCode || !stockName || holdingRatio <= 0) continue
+    list.push({
+      stockCode,
+      stockName,
+      holdingRatio,
+      holdingAmount,
+      changeFromLast: '--'
+    })
+  }
+  return list
+}
+
+function toPlainText(raw: string): string {
+  return raw
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#37;/g, '%')
+    .trim()
+}
+
+function toSecid(stockCode: string): string {
+  return stockCode.startsWith('6') ? `1.${stockCode}` : `0.${stockCode}`
+}
+
+interface StockQuoteLite {
+  dayChange: number
+  sector: string
+}
+
+async function fetchStockQuotes(secids: string[]): Promise<Map<string, StockQuoteLite>> {
+  if (secids.length === 0) return new Map()
+  return new Promise((resolve) => {
+    const callbackName = `stock_quote_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve(new Map())
+    }, 8000)
+
+    ;(window as any)[callbackName] = (data: any) => {
+      cleanup()
+      const map = new Map<string, StockQuoteLite>()
+      const diff = data?.data?.diff
+      if (Array.isArray(diff)) {
+        diff.forEach((item: any) => {
+          const code = item?.f12 ? String(item.f12) : ''
+          if (!code) return
+          map.set(code, {
+            dayChange: Number.isFinite(item?.f3) ? item.f3 / 100 : 0,
+            sector: item?.f100 || item?.f102 || '--'
+          })
+        })
+      }
+      resolve(map)
+    }
+
+    const script = document.createElement('script')
+    script.id = callbackName
+    script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids.join(',')}&fields=f3,f12,f14,f100,f102&cb=${callbackName}&_=${Date.now()}`
+    script.onerror = () => {
+      cleanup()
+      resolve(new Map())
+    }
+
+    function cleanup() {
+      clearTimeout(timeout)
+      const s = document.getElementById(callbackName)
+      if (s) document.body.removeChild(s)
+      try { delete (window as any)[callbackName] } catch { /* ignore */ }
+    }
+
+    document.body.appendChild(script)
+  })
+}
+
 /**
  * 解析重仓股 HTML 数据
  * [WHY] 东方财富返回的是 HTML 格式，需要解析
@@ -491,16 +629,6 @@ export async function fetchStockHoldings(code: string): Promise<StockHolding[]> 
  */
 function parseStockHoldingsHtml(html: string): StockHolding[] {
   const holdings: StockHolding[] = []
-  
-  const toText = (raw: string): string => {
-    return raw
-      .replace(/<br\s*\/?>/gi, ' ')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&#37;/g, '%')
-      .trim()
-  }
 
   // [HOW] 匹配表格行，兼容新版基金F10重仓股HTML结构
   const tableRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi
@@ -519,7 +647,7 @@ function parseStockHoldingsHtml(html: string): StockHolding[] {
     }
     if (tdsRaw.length < 3) continue
 
-    const tds = tdsRaw.map(toText)
+    const tds = tdsRaw.map(toPlainText)
 
     // 新版：第2列股票代码，第3列股票名称，第7列占比，第9列持仓市值
     // 旧版：第1个链接可能含代码，后续列索引略有差异
