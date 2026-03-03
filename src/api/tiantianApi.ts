@@ -1621,43 +1621,64 @@ export async function fetchDividendRecords(fundCode: string): Promise<DividendRe
   const cached = cache.get<DividendRecord[]>(cacheKey)
   if (cached) return cached
   
-  try {
-    // [WHAT] 使用 JSONP 接口获取分红数据
-    const cbName = `dividend_cb_${Date.now()}`
-    const jsonUrl = `https://api.fund.eastmoney.com/f10/fhsp?fundcode=${fundCode}&callback=${cbName}`
-    
-    const jsonResp = await jsonpRequest(jsonUrl, cbName) as { 
-      Datas?: { 
-        fhspList?: Array<{ 
-          DJRQ: string   // 登记日期
-          FFRQ: string   // 发放日期
-          CXRQ: string   // 除息日期
-          FHFCZ: number  // 分红金额
-          FHSP: string   // 分红说明
-        }> 
-      } 
-    } | null
-    
-    const records: DividendRecord[] = []
-    
-    if (jsonResp?.Datas?.fhspList) {
-      for (const item of jsonResp.Datas.fhspList) {
-        records.push({
-          date: item.DJRQ || '',
-          exDate: item.CXRQ || '',
-          payDate: item.FFRQ || '',
-          amount: item.FHFCZ || 0,
-          type: '现金分红'
-        })
+  return new Promise((resolve) => {
+    const scriptId = `dividend_${fundCode}_${Date.now()}`
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve([])
+    }, 10000)
+
+    const script = document.createElement('script')
+    script.id = scriptId
+    script.src = `https://fund.eastmoney.com/pingzhongdata/${fundCode}.js?v=${Date.now()}`
+    script.onload = () => {
+      cleanup()
+      try {
+        const trend = (window as any).Data_netWorthTrend || []
+        const records: DividendRecord[] = trend
+          .filter((item: any) => item?.unitMoney && String(item.unitMoney).includes('分红'))
+          .map((item: any) => {
+            const date = formatDateFromTs(item.x)
+            const info = String(item.unitMoney || '')
+            const amountMatch = info.match(/([\d.]+)\s*元/)
+            const amount = amountMatch ? Number(amountMatch[1]) : 0
+            return {
+              date,
+              exDate: date,
+              payDate: '',
+              amount,
+              type: info.includes('再投') ? '红利再投' : '现金分红'
+            } as DividendRecord
+          })
+          .filter((item: DividendRecord) => item.amount > 0)
+          .sort((a: DividendRecord, b: DividendRecord) => b.date.localeCompare(a.date))
+
+        cache.set(cacheKey, records, CACHE_TTL.LONG)
+        resolve(records)
+      } catch (error) {
+        console.error('[API] 解析分红记录失败:', error)
+        resolve([])
       }
     }
-    
-    cache.set(cacheKey, records, CACHE_TTL.LONG)
-    return records
-  } catch (error) {
-    console.error('[API] 获取分红记录失败:', error)
-    return []
-  }
+    script.onerror = () => {
+      cleanup()
+      resolve([])
+    }
+
+    function cleanup() {
+      clearTimeout(timeout)
+      const s = document.getElementById(scriptId)
+      if (s) s.remove()
+    }
+
+    document.body.appendChild(script)
+  })
+}
+
+function formatDateFromTs(ts: number): string {
+  const date = new Date(Number(ts) || 0)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 // ========== 费率查询 API ==========

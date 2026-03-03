@@ -1432,7 +1432,10 @@ function formatPercent(num: number): string {
           <div class="holding-col ratio">
             {{ stock.holdingRatio.toFixed(2) }}%
           </div>
-          <div class="holding-col diff" :class="String(stock.changeFromLast).startsWith('-') ? 'down' : 'up'">
+          <div
+            class="holding-col diff"
+            :class="stock.changeFromLast === '新增' ? 'new' : (String(stock.changeFromLast).startsWith('-') ? 'down' : 'up')"
+          >
             {{ stock.changeFromLast || '--' }}
           </div>
         </div>
@@ -1496,7 +1499,12 @@ function formatPercent(num: number): string {
           class="dividend-item"
         >
           <div class="dividend-date">{{ record.date }}</div>
-          <div class="dividend-amount">每份派{{ record.amount.toFixed(4) }}元</div>
+          <div class="dividend-amount">
+            <div>每份派{{ record.amount.toFixed(4) }}元</div>
+            <div class="dividend-meta">
+              除息 {{ record.exDate || '--' }} · 发放 {{ record.payDate || '--' }}
+            </div>
+          </div>
           <div class="dividend-type">{{ record.type }}</div>
         </div>
         <div v-if="dividendRecords.length > 5" class="more-hint">
@@ -2361,16 +2369,20 @@ function formatPercent(num: number): string {
 /* ========== 重仓股票 ========== */
 .holdings-list {
   padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .holding-header-row {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) 0.9fr 0.8fr 0.9fr;
   gap: 8px;
-  padding: 2px 0 8px;
+  padding: 4px 10px;
   font-size: 11px;
   color: var(--text-secondary);
-  border-bottom: 1px dashed var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
 }
 
 .holding-header-row span:not(.col-name) {
@@ -2382,12 +2394,14 @@ function formatPercent(num: number): string {
   grid-template-columns: minmax(0, 1.7fr) 0.9fr 0.8fr 0.9fr;
   gap: 8px;
   align-items: center;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border-color);
+  padding: 10px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
 }
 
 .holding-item:last-child {
-  border-bottom: none;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .holding-main {
@@ -2431,6 +2445,10 @@ function formatPercent(num: number): string {
 
 .holding-col.down {
   color: var(--color-down);
+}
+
+.holding-col.new {
+  color: #f59e0b;
 }
 
 .stock-api-status {
@@ -2695,6 +2713,12 @@ function formatPercent(num: number): string {
   font-size: 13px;
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.dividend-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .dividend-type {

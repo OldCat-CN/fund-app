@@ -489,7 +489,7 @@ export async function fetchStockHoldings(code: string): Promise<StockHolding[]> 
             ...item,
             sector: quote?.sector || '--',
             dayChange: quote?.dayChange,
-            changeFromLast: diff === null ? '--' : `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`
+            changeFromLast: diff === null ? '新增' : `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`
           }
         })
         resolve(merged)
