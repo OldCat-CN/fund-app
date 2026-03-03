@@ -49,15 +49,32 @@ interface IntradayPoint {
 const intradayData = ref<IntradayPoint[]>([])
 const baseValue = ref(0)
 
+type PeriodKey = '7d' | '1m' | '3m' | '6m' | '1y'
 
 // [WHAT] 时间周期配置（适配基金每日净值数据）
 const periods = [
-  { key: '7d', label: '7日', days: 7 },     // 近7个交易日
-  { key: '1m', label: '1月', days: 30 },    // 近1个月
-  { key: '3m', label: '3月', days: 90 },    // 近3个月
-  { key: '6m', label: '6月', days: 180 },   // 近6个月
-  { key: '1y', label: '1年', days: 365 },   // 近1年
+  { key: '7d', label: '7日' }, // 近7天
+  { key: '1m', label: '1月' }, // 近1个月
+  { key: '3m', label: '3月' }, // 近3个月
+  { key: '6m', label: '6月' }, // 近6个月
+  { key: '1y', label: '1年' }, // 近1年
 ]
+
+function getTargetDateFromPeriod(endDate: Date, key: PeriodKey): Date {
+  const target = new Date(endDate)
+  if (key === '7d') {
+    target.setDate(target.getDate() - 7)
+  } else if (key === '1m') {
+    target.setMonth(target.getMonth() - 1)
+  } else if (key === '3m') {
+    target.setMonth(target.getMonth() - 3)
+  } else if (key === '6m') {
+    target.setMonth(target.getMonth() - 6)
+  } else if (key === '1y') {
+    target.setFullYear(target.getFullYear() - 1)
+  }
+  return target
+}
 
 // [WHAT] 判断是否是当日分时模式
 const isIntradayMode = computed(() => activePeriod.value === '1d')
@@ -101,7 +118,6 @@ const filteredData = computed(() => {
   
   // [WHY] 其他情况统一使用确认净值数据绘制
   const period = periods.find(p => p.key === currentPeriod)
-  const days = period?.days || 7
 
   const sortedData = [...chartData.value]
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
@@ -115,8 +131,8 @@ const filteredData = computed(() => {
   // [WHAT] 与核心指标一致：终点取最新确认净值日，起点按周期回溯并取前一交易日
   const endRecord = sortedData[sortedData.length - 1]!
   const endDate = new Date(endRecord.time)
-  const targetDate = new Date(endDate)
-  targetDate.setDate(targetDate.getDate() - days)
+  const periodKey = (period?.key || '7d') as PeriodKey
+  const targetDate = getTargetDateFromPeriod(endDate, periodKey)
   const targetMs = targetDate.getTime()
 
   let startIndex = 0

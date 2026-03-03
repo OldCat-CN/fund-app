@@ -34,6 +34,8 @@ type ConfirmedNavRecord = {
   netValue: number
 }
 
+type PeriodKey = '1w' | '1m' | '3m' | '6m' | '1y'
+
 const route = useRoute()
 const router = useRouter()
 const fundStore = useFundStore()
@@ -368,7 +370,82 @@ const halfYearReturn = computed(() => getPeriodFundReturn('6m'))
 const yearReturn = computed(() => getPeriodFundReturn('1y'))
 const allReturn = computed(() => getPeriodFundReturn('all'))
 
-function calculateConfirmedPeriodReturns(history: ConfirmedNavRecord[]): Record<'1w' | '1m' | '3m' | '6m' | '1y', number | null> {
+const coreMetricItems = computed(() => {
+  return [
+    {
+      key: 'day',
+      label: `当日涨幅 ${fundInfo.value?.gztime?.slice(5, 10) || '--'}`,
+      value: formatPercent(priceChangePercent.value),
+      tone: isUp.value ? 'up' : 'down'
+    },
+    {
+      key: 'estimate',
+      label: '估算净值',
+      value: fundInfo.value?.gsz || '--',
+      tone: 'normal'
+    },
+    {
+      key: 'last',
+      label: '昨日净值',
+      value: fundInfo.value?.dwjz || '--',
+      tone: 'normal'
+    },
+    {
+      key: '1w',
+      label: '近1周涨跌幅',
+      value: weekReturn.value !== null ? formatPercent(weekReturn.value) : '--',
+      tone: (weekReturn.value ?? 0) >= 0 ? 'up' : 'down'
+    },
+    {
+      key: '1m',
+      label: '近1月涨跌幅',
+      value: monthReturn.value !== null ? formatPercent(monthReturn.value) : '--',
+      tone: (monthReturn.value ?? 0) >= 0 ? 'up' : 'down'
+    },
+    {
+      key: '3m',
+      label: '近3月涨跌幅',
+      value: quarterReturn.value !== null ? formatPercent(quarterReturn.value) : '--',
+      tone: (quarterReturn.value ?? 0) >= 0 ? 'up' : 'down'
+    },
+    {
+      key: '6m',
+      label: '近6月涨跌幅',
+      value: halfYearReturn.value !== null ? formatPercent(halfYearReturn.value) : '--',
+      tone: (halfYearReturn.value ?? 0) >= 0 ? 'up' : 'down'
+    },
+    {
+      key: '1y',
+      label: '近1年涨跌幅',
+      value: yearReturn.value !== null ? formatPercent(yearReturn.value) : '--',
+      tone: (yearReturn.value ?? 0) >= 0 ? 'up' : 'down'
+    },
+    {
+      key: 'all',
+      label: '成立来涨跌幅',
+      value: allReturn.value !== null ? formatPercent(allReturn.value) : '--',
+      tone: (allReturn.value ?? 0) >= 0 ? 'up' : 'down'
+    }
+  ]
+})
+
+function getTargetDateFromPeriod(endDate: Date, key: PeriodKey): Date {
+  const target = new Date(endDate)
+  if (key === '1w') {
+    target.setDate(target.getDate() - 7)
+  } else if (key === '1m') {
+    target.setMonth(target.getMonth() - 1)
+  } else if (key === '3m') {
+    target.setMonth(target.getMonth() - 3)
+  } else if (key === '6m') {
+    target.setMonth(target.getMonth() - 6)
+  } else if (key === '1y') {
+    target.setFullYear(target.getFullYear() - 1)
+  }
+  return target
+}
+
+function calculateConfirmedPeriodReturns(history: ConfirmedNavRecord[]): Record<PeriodKey, number | null> {
   const empty = { '1w': null, '1m': null, '3m': null, '6m': null, '1y': null }
   if (!history || history.length < 2) return empty
 
@@ -380,19 +457,14 @@ function calculateConfirmedPeriodReturns(history: ConfirmedNavRecord[]): Record<
   const endDate = new Date(end.date)
   if (Number.isNaN(endDate.getTime()) || end.netValue <= 0) return empty
 
-  const byKey: Array<{ key: '1w' | '1m' | '3m' | '6m' | '1y'; days: number }> = [
-    { key: '1w', days: 7 },
-    { key: '1m', days: 30 },
-    { key: '3m', days: 90 },
-    { key: '6m', days: 180 },
-    { key: '1y', days: 365 }
+  const byKey: PeriodKey[] = [
+    '1w', '1m', '3m', '6m', '1y'
   ]
 
-  const result: Record<'1w' | '1m' | '3m' | '6m' | '1y', number | null> = { ...empty }
+  const result: Record<PeriodKey, number | null> = { ...empty }
 
-  for (const { key, days } of byKey) {
-    const targetDate = new Date(endDate)
-    targetDate.setDate(targetDate.getDate() - days)
+  for (const key of byKey) {
+    const targetDate = getTargetDateFromPeriod(endDate, key)
     const targetMs = targetDate.getTime()
 
     // 目标日若非交易日，则取前一个交易日（即 <= targetDate 的最近记录）
@@ -739,6 +811,29 @@ const assetPieData = computed(() => {
   })
 })
 
+const selectedAssetName = ref('')
+
+const selectedAssetItem = computed(() => {
+  const items = assetPieData.value
+  if (items.length === 0) return null
+  const hit = items.find(i => i.name === selectedAssetName.value)
+  return hit || items[0] || null
+})
+
+watch(assetPieData, (items) => {
+  if (!items.length) {
+    selectedAssetName.value = ''
+    return
+  }
+  if (!items.find(i => i.name === selectedAssetName.value)) {
+    selectedAssetName.value = items[0]!.name
+  }
+}, { immediate: true })
+
+function selectAssetItem(name: string) {
+  selectedAssetName.value = name
+}
+
 // [WHAT] 打开公告链接
 function openAnnouncement(url: string) {
   if (url) {
@@ -778,61 +873,21 @@ function formatPercent(num: number): string {
       
       <!-- 核心指标 -->
       <div class="core-metrics" v-if="!isLoading">
-        <div class="headline-metrics">
-          <div class="headline-item">
-            <div class="headline-label">当日涨幅 {{ fundInfo?.gztime?.slice(5, 10) || '--' }}</div>
-            <div class="headline-value" :class="isUp ? 'up' : 'down'">
-              {{ formatPercent(priceChangePercent) }}
-            </div>
-          </div>
-          <div class="headline-item">
-            <div class="headline-label">估算净值</div>
-            <div class="headline-value">
-              {{ fundInfo?.gsz || '--' }}
-            </div>
-          </div>
-          <div class="headline-item">
-            <div class="headline-label">昨日净值</div>
-            <div class="headline-value">
-              {{ fundInfo?.dwjz || '--' }}
-            </div>
-          </div>
-        </div>
-        <div class="sub-metrics">
-          <div class="metric-item">
-            <div class="metric-label">近1周涨跌幅</div>
-            <div class="metric-value" :class="(weekReturn ?? 0) >= 0 ? 'up' : 'down'">
-              {{ weekReturn !== null ? formatPercent(weekReturn) : '--' }}
-            </div>
-          </div>
-          <div class="metric-item">
-            <div class="metric-label">近1月涨跌幅</div>
-            <div class="metric-value" :class="(monthReturn ?? 0) >= 0 ? 'up' : 'down'">
-              {{ monthReturn !== null ? formatPercent(monthReturn) : '--' }}
-            </div>
-          </div>
-          <div class="metric-item">
-            <div class="metric-label">近3月涨跌幅</div>
-            <div class="metric-value" :class="(quarterReturn ?? 0) >= 0 ? 'up' : 'down'">
-              {{ quarterReturn !== null ? formatPercent(quarterReturn) : '--' }}
-            </div>
-          </div>
-          <div class="metric-item">
-            <div class="metric-label">近6月涨跌幅</div>
-            <div class="metric-value" :class="(halfYearReturn ?? 0) >= 0 ? 'up' : 'down'">
-              {{ halfYearReturn !== null ? formatPercent(halfYearReturn) : '--' }}
-            </div>
-          </div>
-          <div class="metric-item">
-            <div class="metric-label">近1年涨跌幅</div>
-            <div class="metric-value" :class="(yearReturn ?? 0) >= 0 ? 'up' : 'down'">
-              {{ yearReturn !== null ? formatPercent(yearReturn) : '--' }}
-            </div>
-          </div>
-          <div class="metric-item">
-            <div class="metric-label">成立来涨跌幅</div>
-            <div class="metric-value" :class="(allReturn ?? 0) >= 0 ? 'up' : 'down'">
-              {{ allReturn !== null ? formatPercent(allReturn) : '--' }}
+        <div class="metrics-grid">
+          <div
+            v-for="item in coreMetricItems"
+            :key="item.key"
+            class="metric-card"
+          >
+            <div class="metric-card-label">{{ item.label }}</div>
+            <div
+              class="metric-card-value"
+              :class="{
+                up: item.tone === 'up',
+                down: item.tone === 'down'
+              }"
+            >
+              {{ item.value }}
             </div>
           </div>
         </div>
@@ -1158,53 +1213,55 @@ function formatPercent(num: number): string {
         </div>
       </div>
       
-      <!-- 申购费率 -->
-      <div class="fee-table">
-        <div class="table-title">申购费率</div>
-        <div class="table-row header">
-          <span>金额</span>
-          <span>原费率</span>
-          <span>优惠费率</span>
+      <div class="fee-tables">
+        <!-- 申购费率 -->
+        <div class="fee-table">
+          <div class="table-title">申购费率</div>
+          <div class="table-row header">
+            <span>金额</span>
+            <span>原费率</span>
+            <span>优惠费率</span>
+          </div>
+          <div 
+            v-for="(fee, idx) in fundFees.purchaseFees.slice(0, 4)" 
+            :key="'p' + idx"
+            class="table-row"
+          >
+            <span>
+              {{ fee.minAmount === 0 && fee.maxAmount === Infinity 
+                ? '全部金额'
+                : fee.maxAmount === Infinity 
+                  ? `≥${fee.minAmount}万` 
+                  : fee.minAmount === 0
+                    ? `<${fee.maxAmount}万`
+                    : `${fee.minAmount}-${fee.maxAmount}万` }}
+            </span>
+            <span>{{ fee.rate >= 1000 ? `${fee.rate}元` : fee.rate === 0 ? '免费' : `${fee.rate}%` }}</span>
+            <span class="discount">{{ fee.discountRate >= 1000 ? `${fee.discountRate}元` : fee.discountRate === 0 ? '免费' : `${fee.discountRate}%` }}</span>
+          </div>
         </div>
-        <div 
-          v-for="(fee, idx) in fundFees.purchaseFees.slice(0, 4)" 
-          :key="'p' + idx"
-          class="table-row"
-        >
-          <span>
-            {{ fee.minAmount === 0 && fee.maxAmount === Infinity 
-              ? '全部金额'
-              : fee.maxAmount === Infinity 
-                ? `≥${fee.minAmount}万` 
-                : fee.minAmount === 0
-                  ? `<${fee.maxAmount}万`
-                  : `${fee.minAmount}-${fee.maxAmount}万` }}
-          </span>
-          <span>{{ fee.rate >= 1000 ? `${fee.rate}元` : fee.rate === 0 ? '免费' : `${fee.rate}%` }}</span>
-          <span class="discount">{{ fee.discountRate >= 1000 ? `${fee.discountRate}元` : fee.discountRate === 0 ? '免费' : `${fee.discountRate}%` }}</span>
-        </div>
-      </div>
-      
-      <!-- 赎回费率 -->
-      <div class="fee-table">
-        <div class="table-title">赎回费率</div>
-        <div class="table-row header">
-          <span>持有期限</span>
-          <span>费率</span>
-        </div>
-        <div 
-          v-for="(fee, idx) in fundFees.redemptionFees" 
-          :key="'r' + idx"
-          class="table-row"
-        >
-          <span>
-            {{ fee.maxDays === Infinity 
-              ? `≥${fee.minDays}天` 
-              : fee.minDays === 0 
-                ? `<${fee.maxDays}天`
-                : `${fee.minDays}-${fee.maxDays}天` }}
-          </span>
-          <span :class="{ free: fee.rate === 0 }">{{ fee.rate === 0 ? '免费' : `${fee.rate}%` }}</span>
+        
+        <!-- 赎回费率 -->
+        <div class="fee-table">
+          <div class="table-title">赎回费率</div>
+          <div class="table-row header">
+            <span>持有期限</span>
+            <span>费率</span>
+          </div>
+          <div 
+            v-for="(fee, idx) in fundFees.redemptionFees" 
+            :key="'r' + idx"
+            class="table-row"
+          >
+            <span>
+              {{ fee.maxDays === Infinity 
+                ? `≥${fee.minDays}天` 
+                : fee.minDays === 0 
+                  ? `<${fee.maxDays}天`
+                  : `${fee.minDays}-${fee.maxDays}天` }}
+            </span>
+            <span :class="{ free: fee.rate === 0 }">{{ fee.rate === 0 ? '免费' : `${fee.rate}%` }}</span>
+          </div>
         </div>
       </div>
       
@@ -1302,12 +1359,25 @@ function formatPercent(num: number): string {
               stroke-width="20"
               :stroke-dasharray="item.dashArray"
               :stroke-dashoffset="item.offset"
+              :class="{ active: selectedAssetItem?.name === item.name }"
               :style="{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%' }"
+              @click="selectAssetItem(item.name)"
+              @touchstart.prevent="selectAssetItem(item.name)"
             />
           </svg>
+          <div v-if="selectedAssetItem" class="asset-center-info">
+            <div class="asset-center-name">{{ selectedAssetItem.name }}</div>
+            <div class="asset-center-ratio">{{ selectedAssetItem.ratio.toFixed(2) }}%</div>
+          </div>
         </div>
         <div class="asset-legend">
-          <div v-for="item in assetPieData" :key="item.name" class="asset-legend-item">
+          <div
+            v-for="item in assetPieData"
+            :key="item.name"
+            class="asset-legend-item"
+            :class="{ active: selectedAssetItem?.name === item.name }"
+            @click="selectAssetItem(item.name)"
+          >
             <span class="legend-dot" :style="{ background: item.color }"></span>
             <span class="legend-name">{{ item.name }}</span>
             <span class="legend-ratio">{{ item.ratio.toFixed(2) }}%</span>
@@ -1656,76 +1726,40 @@ function formatPercent(num: number): string {
   padding: 40px;
 }
 
-.headline-metrics {
+.metrics-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-bottom: 12px;
 }
 
-.headline-item {
+.metric-card {
   background: var(--bg-tertiary);
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  min-height: 66px;
+  min-height: 64px;
   justify-content: space-between;
 }
 
-.headline-label {
+.metric-card-label {
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.headline-value {
+.metric-card-value {
   margin-top: 8px;
-  font-size: 20px;
-  font-weight: 600;
-  font-family: 'DIN Alternate', -apple-system, monospace;
-  color: var(--text-primary);
-}
-
-.headline-value.up {
-  color: #f56c6c;
-}
-
-.headline-value.down {
-  color: #67c23a;
-}
-
-.sub-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.sub-metrics .metric-item {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-tertiary);
-  border-radius: 8px;
-  padding: 8px 10px;
-  gap: 4px;
-}
-
-.sub-metrics .metric-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.sub-metrics .metric-value {
   font-size: 16px;
   font-weight: 600;
   font-family: 'DIN Alternate', -apple-system, monospace;
   color: var(--text-primary);
 }
 
-.sub-metrics .metric-value.up {
+.metric-card-value.up {
   color: #f56c6c;
 }
 
-.sub-metrics .metric-value.down {
+.metric-card-value.down {
   color: #67c23a;
 }
 
@@ -2178,17 +2212,25 @@ function formatPercent(num: number): string {
   color: var(--text-primary);
 }
 
-.fee-table {
+.fee-tables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
   margin: 10px 12px;
+}
+
+.fee-table {
+  margin: 0;
   padding: 12px;
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
+  min-width: 0;
 }
 
 .fee-table:last-of-type {
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 .table-title {
@@ -2396,15 +2438,21 @@ function formatPercent(num: number): string {
 /* ========== 资产配置 ========== */
 .asset-chart {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  padding: 16px;
-  gap: 20px;
+  justify-content: center;
+  padding: 12px 16px 16px;
+  gap: 12px;
 }
 
 .asset-pie-wrap {
-  width: 120px;
-  height: 120px;
+  width: 160px;
+  height: 160px;
   flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .asset-pie {
@@ -2412,11 +2460,48 @@ function formatPercent(num: number): string {
   height: 100%;
 }
 
+.asset-pie circle {
+  cursor: pointer;
+  transition: opacity 0.2s ease, stroke-width 0.2s ease;
+}
+
+.asset-pie circle.active {
+  stroke-width: 22;
+  opacity: 1;
+}
+
+.asset-pie circle:not(.active) {
+  opacity: 0.72;
+}
+
+.asset-center-info {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.asset-center-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.asset-center-ratio {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'DIN Alternate', -apple-system, monospace;
+  color: var(--text-primary);
+}
+
 .asset-legend {
-  flex: 1;
+  width: 100%;
+  max-width: 360px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .asset-legend-item {
@@ -2424,6 +2509,15 @@ function formatPercent(num: number): string {
   align-items: center;
   gap: 8px;
   font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.asset-legend-item.active {
+  border-color: var(--border-color);
+  background: var(--bg-tertiary);
 }
 
 .legend-dot {
@@ -2442,6 +2536,12 @@ function formatPercent(num: number): string {
   font-weight: 600;
   color: var(--text-primary);
   font-family: 'DIN Alternate', -apple-system, monospace;
+}
+
+@media (max-width: 640px) {
+  .fee-tables {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ========== 基金评级 ========== */
