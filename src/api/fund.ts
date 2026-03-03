@@ -445,13 +445,26 @@ export async function fetchNetValueHistory(
  */
 export async function fetchStockHoldings(code: string): Promise<StockHolding[]> {
   return new Promise((resolve, reject) => {
-    const callbackName = `jjcc_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const scriptId = `jjcc_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const timeout = setTimeout(() => {
       cleanup()
       reject(new Error('获取重仓股超时'))
     }, 15000)
 
-    ;(window as any)[callbackName] = async (data: any) => {
+    function cleanup() {
+      clearTimeout(timeout)
+      const script = document.getElementById(scriptId)
+      if (script) {
+        document.body.removeChild(script)
+      }
+    }
+
+    const script = document.createElement('script')
+    script.id = scriptId
+    // [DEPS] 东方财富重仓股接口
+    script.src = `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${code}&topline=10&year=&month=&_=${Date.now()}`
+    script.onload = async () => {
+      const data = (window as any).apidata
       cleanup()
       if (!data || !data.content) {
         resolve([])
@@ -484,20 +497,6 @@ export async function fetchStockHoldings(code: string): Promise<StockHolding[]> 
         resolve(parseStockHoldingsHtml(data.content))
       }
     }
-
-    function cleanup() {
-      clearTimeout(timeout)
-      delete (window as any)[callbackName]
-      const script = document.getElementById(callbackName)
-      if (script) {
-        document.body.removeChild(script)
-      }
-    }
-
-    const script = document.createElement('script')
-    script.id = callbackName
-    // [DEPS] 东方财富重仓股接口
-    script.src = `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${code}&topline=10&year=&month=&callback=${callbackName}&_=${Date.now()}`
     script.onerror = () => {
       cleanup()
       reject(new Error('获取重仓股失败'))
