@@ -7,7 +7,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useFundStore } from '@/stores/fund'
 import { useHoldingStore } from '@/stores/holding'
-import { fetchStockHoldings, detectShareClass } from '@/api/fund'
+import { fetchStockHoldings, detectShareClass, fetchFundDetailInfo, type FundDetailInfo } from '@/api/fund'
 import { 
   fetchFundEstimateFast, fetchFundAccurateData, fetchIndustryAllocation, fetchAssetAllocation, fetchFundRating,
   calculatePeriodReturns,
@@ -69,6 +69,7 @@ const dividendRecords = ref<DividendRecord[]>([])
 const fundFees = ref<FundFeeInfo | null>(null)
 const announcements = ref<FundAnnouncement[]>([])
 const fundScale = ref<FundScale | null>(null)
+const fundDetailInfo = ref<FundDetailInfo | null>(null)
 
 // [WHAT] 行业配置和评级数据
 const industryAllocation = ref<IndustryAllocation[]>([])
@@ -182,6 +183,7 @@ watch(fundCode, async (newCode, oldCode) => {
     fundFees.value = null
     announcements.value = []
     fundScale.value = null
+    fundDetailInfo.value = null
     isLoading.value = true
     await loadFundData()
   }
@@ -314,6 +316,7 @@ async function loadFundData() {
     fetchFundFees(fundCode.value).then(f => fundFees.value = f).catch(() => {})
     fetchFundAnnouncements(fundCode.value).then(a => announcements.value = a).catch(() => {})
     fetchFundScale(fundCode.value).then(s => fundScale.value = s).catch(() => {})
+    fetchFundDetailInfo(fundCode.value).then(info => fundDetailInfo.value = info).catch(() => {})
       
   } catch {
     showToast('加载失败')
@@ -793,7 +796,9 @@ const assetPieData = computed(() => {
     { name: '债券', ratio: assetAllocation.value.bond, color: '#22c55e' },
     { name: '现金', ratio: assetAllocation.value.cash, color: '#f59e0b' },
     { name: '其他', ratio: assetAllocation.value.other, color: '#8b5cf6' }
-  ].filter(i => i.ratio > 0)
+  ]
+    .filter(i => i.ratio > 0)
+    .sort((a, b) => b.ratio - a.ratio)
 
   const total = raw.reduce((sum, i) => sum + i.ratio, 0)
   if (total <= 0) return []
@@ -832,6 +837,19 @@ watch(assetPieData, (items) => {
 
 function selectAssetItem(name: string) {
   selectedAssetName.value = name
+}
+
+const assetCenterNetAsset = computed(() => {
+  const netAsset = fundDetailInfo.value?.scale || 0
+  if (!Number.isFinite(netAsset) || netAsset <= 0) return null
+  return netAsset
+})
+
+function formatAssetScale(scale: number): string {
+  if (scale >= 10000) {
+    return `${(scale / 10000).toFixed(2)}万亿`
+  }
+  return `${scale.toFixed(2)}亿`
 }
 
 // [WHAT] 打开公告链接
@@ -1023,6 +1041,7 @@ function formatPercent(num: number): string {
         :realtime-value="fundInfo?.gsz ? parseFloat(fundInfo.gsz) : 0"
         :realtime-change="priceChangePercent"
         :last-close="fundInfo?.dwjz ? parseFloat(fundInfo.dwjz) : 0"
+        :establish-date="fundDetailInfo?.establishDate || ''"
       />
       
     </div>
@@ -1365,9 +1384,15 @@ function formatPercent(num: number): string {
               @touchstart.prevent="selectAssetItem(item.name)"
             />
           </svg>
-          <div v-if="selectedAssetItem" class="asset-center-info">
-            <div class="asset-center-name">{{ selectedAssetItem.name }}</div>
-            <div class="asset-center-ratio">{{ selectedAssetItem.ratio.toFixed(2) }}%</div>
+          <div class="asset-center-info">
+            <template v-if="assetCenterNetAsset !== null">
+              <div class="asset-center-name">净资产</div>
+              <div class="asset-center-ratio">{{ formatAssetScale(assetCenterNetAsset) }}</div>
+            </template>
+            <template v-else-if="selectedAssetItem">
+              <div class="asset-center-name">{{ selectedAssetItem.name }}</div>
+              <div class="asset-center-ratio">{{ selectedAssetItem.ratio.toFixed(2) }}%</div>
+            </template>
           </div>
         </div>
         <div class="asset-legend">
@@ -2438,11 +2463,11 @@ function formatPercent(num: number): string {
 /* ========== 资产配置 ========== */
 .asset-chart {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   padding: 12px 16px 16px;
-  gap: 12px;
+  gap: 16px;
 }
 
 .asset-pie-wrap {
@@ -2497,8 +2522,7 @@ function formatPercent(num: number): string {
 }
 
 .asset-legend {
-  width: 100%;
-  max-width: 360px;
+  width: min(320px, 56%);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2541,6 +2565,19 @@ function formatPercent(num: number): string {
 @media (max-width: 640px) {
   .fee-tables {
     grid-template-columns: 1fr;
+  }
+
+  .asset-chart {
+    gap: 10px;
+  }
+
+  .asset-pie-wrap {
+    width: 140px;
+    height: 140px;
+  }
+
+  .asset-legend {
+    width: min(220px, 52%);
   }
 }
 

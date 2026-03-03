@@ -13,6 +13,7 @@ const props = defineProps<{
   realtimeValue: number
   realtimeChange: number
   lastClose: number
+  establishDate?: string
 }>()
 
 const themeStore = useThemeStore()
@@ -35,7 +36,7 @@ function getThemeColors() {
 // ========== 状态 ==========
 const chartData = ref<SimpleKLineData[]>([])
 const isLoading = ref(false)
-const activePeriod = ref('7d') // 默认显示7日走势
+const activePeriod = ref<PeriodKey>('1w')
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const chartMode = ref<'net' | 'change'>('change')
 const hoveredIndex = ref<number | null>(null)
@@ -49,20 +50,31 @@ interface IntradayPoint {
 const intradayData = ref<IntradayPoint[]>([])
 const baseValue = ref(0)
 
-type PeriodKey = '7d' | '1m' | '3m' | '6m' | '1y'
+type PeriodKey = '1d' | '1w' | '1m' | '3m' | '6m' | '1y' | '3y' | '5y' | 'all'
+interface PeriodOption {
+  key: PeriodKey
+  label: string
+  minDays: number
+}
 
 // [WHAT] 时间周期配置（适配基金每日净值数据）
-const periods = [
-  { key: '7d', label: '7日' }, // 近7天
-  { key: '1m', label: '1月' }, // 近1个月
-  { key: '3m', label: '3月' }, // 近3个月
-  { key: '6m', label: '6月' }, // 近6个月
-  { key: '1y', label: '1年' }, // 近1年
+const allPeriodOptions: PeriodOption[] = [
+  { key: '1w', label: '近1周', minDays: 7 },
+  { key: '1m', label: '近1月', minDays: 30 },
+  { key: '3m', label: '近3月', minDays: 90 },
+  { key: '6m', label: '近6月', minDays: 180 },
+  { key: '1y', label: '近1年', minDays: 365 },
+  { key: '3y', label: '近3年', minDays: 365 * 3 },
+  { key: '5y', label: '近5年', minDays: 365 * 5 },
+  { key: 'all', label: '成立来', minDays: 0 },
 ]
 
 function getTargetDateFromPeriod(endDate: Date, key: PeriodKey): Date {
   const target = new Date(endDate)
-  if (key === '7d') {
+  if (key === 'all') {
+    return target
+  }
+  if (key === '1w') {
     target.setDate(target.getDate() - 7)
   } else if (key === '1m') {
     target.setMonth(target.getMonth() - 1)
@@ -72,6 +84,10 @@ function getTargetDateFromPeriod(endDate: Date, key: PeriodKey): Date {
     target.setMonth(target.getMonth() - 6)
   } else if (key === '1y') {
     target.setFullYear(target.getFullYear() - 1)
+  } else if (key === '3y') {
+    target.setFullYear(target.getFullYear() - 3)
+  } else if (key === '5y') {
+    target.setFullYear(target.getFullYear() - 5)
   }
   return target
 }
@@ -84,6 +100,19 @@ const isIntradayMode = computed(() => activePeriod.value === '1d')
 const showIntradayChart = computed(() => isIntradayMode.value)
 
 const showChangeMode = computed(() => chartMode.value === 'change')
+
+const availablePeriods = computed<PeriodOption[]>(() => {
+  if (chartData.value.length === 0) {
+    return allPeriodOptions.filter(i => i.key === '1w' || i.key === 'all')
+  }
+  const sortedData = [...chartData.value].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+  const earliestByData = new Date(sortedData[0]!.time)
+  const endDate = new Date(sortedData[sortedData.length - 1]!.time)
+  const estDateRaw = props.establishDate ? new Date(props.establishDate) : null
+  const startDate = estDateRaw && !Number.isNaN(estDateRaw.getTime()) ? estDateRaw : earliestByData
+  const spanDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
+  return allPeriodOptions.filter(item => item.minDays === 0 || spanDays >= item.minDays)
+})
 
 // [WHAT] 过滤数据
 const filteredData = computed(() => {
@@ -117,7 +146,7 @@ const filteredData = computed(() => {
   }
   
   // [WHY] 其他情况统一使用确认净值数据绘制
-  const period = periods.find(p => p.key === currentPeriod)
+  const period = availablePeriods.value.find(p => p.key === currentPeriod)
 
   const sortedData = [...chartData.value]
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
@@ -131,19 +160,23 @@ const filteredData = computed(() => {
   // [WHAT] 与核心指标一致：终点取最新确认净值日，起点按周期回溯并取前一交易日
   const endRecord = sortedData[sortedData.length - 1]!
   const endDate = new Date(endRecord.time)
-  const periodKey = (period?.key || '7d') as PeriodKey
-  const targetDate = getTargetDateFromPeriod(endDate, periodKey)
-  const targetMs = targetDate.getTime()
+  const periodKey = (period?.key || '1w') as PeriodKey
+  let data = sortedData
 
-  let startIndex = 0
-  for (let i = sortedData.length - 1; i >= 0; i--) {
-    const t = new Date(sortedData[i]!.time).getTime()
-    if (!Number.isNaN(t) && t <= targetMs) {
-      startIndex = i
-      break
+  if (periodKey !== 'all') {
+    const targetDate = getTargetDateFromPeriod(endDate, periodKey)
+    const targetMs = targetDate.getTime()
+
+    let startIndex = 0
+    for (let i = sortedData.length - 1; i >= 0; i--) {
+      const t = new Date(sortedData[i]!.time).getTime()
+      if (!Number.isNaN(t) && t <= targetMs) {
+        startIndex = i
+        break
+      }
     }
+    data = sortedData.slice(startIndex)
   }
-  let data = sortedData.slice(startIndex)
 
   // [WHAT] 在确认净值区间末尾补一个今天的估值预测点，起点保持不变
   if (props.realtimeValue > 0 && data.length > 0) {
@@ -227,7 +260,7 @@ async function loadData() {
   try {
     clearFundCache(props.fundCode)
     
-    const kline = await fetchSimpleKLineData(props.fundCode, 400)
+    const kline = await fetchSimpleKLineData(props.fundCode, 5000)
     
     chartData.value = kline
     
@@ -729,7 +762,7 @@ function drawChart() {
 }
 
 // ========== 事件处理 ==========
-function selectPeriod(key: string) {
+function selectPeriod(key: PeriodKey) {
   // [WHY] 先停止动画，避免旧数据干扰
   stopAnimation()
   hoveredIndex.value = null
@@ -807,6 +840,13 @@ watch(activePeriod, () => {
   nextTick(drawChart)
 })
 
+watch(availablePeriods, (items) => {
+  if (!items.length) return
+  if (!items.find(item => item.key === activePeriod.value)) {
+    activePeriod.value = items[0]!.key
+  }
+}, { immediate: true })
+
 watch(chartMode, () => {
   nextTick(drawChart)
 })
@@ -842,14 +882,16 @@ onUnmounted(() => {
   <div class="pro-chart">
     <!-- 时间周期选择器 -->
     <div class="period-selector">
-      <div
-        v-for="p in periods"
-        :key="p.key"
-        class="period-btn"
-        :class="{ active: activePeriod === p.key }"
-        @click.stop="selectPeriod(p.key)"
-      >
-        {{ p.label }}
+      <div class="period-scroll">
+        <div
+          v-for="p in availablePeriods"
+          :key="p.key"
+          class="period-btn"
+          :class="{ active: activePeriod === p.key }"
+          @click.stop="selectPeriod(p.key)"
+        >
+          {{ p.label }}
+        </div>
       </div>
       <div class="period-tools">
         <span class="tool-label">实时</span>
@@ -929,23 +971,31 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  gap: 2px;
+  gap: 8px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.period-scroll {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
 }
 
-.period-selector::-webkit-scrollbar {
+.period-scroll::-webkit-scrollbar {
   display: none;
 }
 
 .period-btn {
+  flex: 0 0 auto;
   min-height: 36px;
-  min-width: 44px;
-  padding: 8px 14px;
-  font-size: 14px;
+  min-width: 56px;
+  padding: 8px 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   background: transparent;
   border-radius: 6px;
@@ -969,7 +1019,6 @@ onUnmounted(() => {
 }
 
 .period-tools {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
