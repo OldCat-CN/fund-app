@@ -803,7 +803,8 @@ const assetPieData = computed(() => {
   const total = raw.reduce((sum, i) => sum + i.ratio, 0)
   if (total <= 0) return []
 
-  const circumference = 2 * Math.PI * 40
+  const radius = 38
+  const circumference = 2 * Math.PI * radius
   let accumulatedOffset = 0
 
   return raw.map(item => {
@@ -1295,34 +1296,6 @@ function formatPercent(num: number): string {
       </div>
     </div>
 
-    <!-- ========== 重仓股票 ========== -->
-    <div class="info-section">
-      <div class="section-header">
-        <span>重仓股票</span>
-        <span class="section-tip" v-if="stockHoldings.length > 0">
-          TOP{{ stockHoldings.length }}
-        </span>
-      </div>
-      <div v-if="stockHoldings.length > 0" class="holdings-list">
-        <div 
-          v-for="(stock, idx) in stockHoldings" 
-          :key="idx"
-          class="holding-item"
-        >
-          <div class="holding-rank">{{ idx + 1 }}</div>
-          <div class="holding-info">
-            <div class="holding-name">{{ stock.stockName }}</div>
-            <div class="holding-code">{{ stock.stockCode }}</div>
-          </div>
-          <div class="holding-ratio">
-            <div class="ratio-value">{{ stock.holdingRatio.toFixed(2) }}%</div>
-            <div class="ratio-label">持仓占比</div>
-          </div>
-        </div>
-      </div>
-      <div v-else class="empty-hint">暂无持仓数据</div>
-    </div>
-
     <!-- ========== 行业配置 ========== -->
     <div class="info-section" v-if="industryAllocation.length > 0">
       <div class="section-header">
@@ -1372,10 +1345,11 @@ function formatPercent(num: number): string {
               :key="item.name"
               cx="50"
               cy="50"
-              r="40"
+              r="38"
               fill="transparent"
               :stroke="item.color"
-              stroke-width="20"
+              stroke-width="16"
+              stroke-linecap="round"
               :stroke-dasharray="item.dashArray"
               :stroke-dashoffset="item.offset"
               :class="{ active: selectedAssetItem?.name === item.name }"
@@ -1409,6 +1383,34 @@ function formatPercent(num: number): string {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ========== 重仓股票 ========== -->
+    <div class="info-section">
+      <div class="section-header">
+        <span>重仓股票</span>
+        <span class="section-tip" v-if="stockHoldings.length > 0">
+          TOP{{ stockHoldings.length }}
+        </span>
+      </div>
+      <div v-if="stockHoldings.length > 0" class="holdings-list">
+        <div 
+          v-for="(stock, idx) in stockHoldings" 
+          :key="idx"
+          class="holding-item"
+        >
+          <div class="holding-rank">{{ idx + 1 }}</div>
+          <div class="holding-info">
+            <div class="holding-name">{{ stock.stockName }}</div>
+            <div class="holding-code">{{ stock.stockCode }}</div>
+          </div>
+          <div class="holding-ratio">
+            <div class="ratio-value">{{ stock.holdingRatio.toFixed(2) }}%</div>
+            <div class="ratio-label">持仓占比</div>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-hint">暂无持仓数据</div>
     </div>
 
     <!-- ========== 基金评级 ========== -->
@@ -2483,6 +2485,7 @@ function formatPercent(num: number): string {
 .asset-pie {
   width: 100%;
   height: 100%;
+  overflow: visible;
 }
 
 .asset-pie circle {
@@ -2491,8 +2494,9 @@ function formatPercent(num: number): string {
 }
 
 .asset-pie circle.active {
-  stroke-width: 22;
+  stroke-width: 18;
   opacity: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
 }
 
 .asset-pie circle:not(.active) {
