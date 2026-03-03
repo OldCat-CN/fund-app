@@ -5,6 +5,7 @@
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Snackbar } from '@varlet/ui'
+import TabBarIcon from '@/components/TabBarIcon.vue'
 
 // [WHAT] 水印文字
 const watermarkText = '开源软件基金宝'
@@ -71,12 +72,12 @@ onUnmounted(() => {
 
 // [WHAT] Tab配置
 const tabs = [
-  { name: 'holding', label: '持仓', icon: 'list', route: '/holding' },
-  { name: 'market', label: '行情', icon: 'multiline_chart', route: '/market' },
-  { name: 'home', label: '自选', icon: 'home', route: '/' },
-  { name: 'analysis', label: '分析', icon: 'assessment', route: '/analysis' },
-  { name: 'announcement', label: '公告', icon: 'bell', route: '/announcement' }
-]
+  { name: 'holding', label: '持仓', route: '/holding' },
+  { name: 'market', label: '行情', route: '/market' },
+  { name: 'home', label: '自选', route: '/' },
+  { name: 'analysis', label: '分析', route: '/analysis' },
+  { name: 'announcement', label: '公告', route: '/announcement' }
+] as const
 
 // [FIX] #50 从本地存储恢复上次访问的主页面
 function getLastTab(): number {
@@ -155,8 +156,11 @@ function onTabChange(index: number) {
         v-for="(tab, index) in tabs"
         :key="tab.name"
         :label="tab.label"
-        :icon="tab.icon"
-      />
+      >
+        <template #icon>
+          <TabBarIcon :name="tab.name" />
+        </template>
+      </var-bottom-navigation-item>
     </var-bottom-navigation>
   </div>
 </template>
