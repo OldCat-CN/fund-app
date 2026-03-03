@@ -714,6 +714,31 @@ const industryPieData = computed(() => {
   })
 })
 
+const assetPieData = computed(() => {
+  if (!assetAllocation.value) return []
+  const raw = [
+    { name: '股票', ratio: assetAllocation.value.stock, color: '#3b82f6' },
+    { name: '债券', ratio: assetAllocation.value.bond, color: '#22c55e' },
+    { name: '现金', ratio: assetAllocation.value.cash, color: '#f59e0b' },
+    { name: '其他', ratio: assetAllocation.value.other, color: '#8b5cf6' }
+  ].filter(i => i.ratio > 0)
+
+  const total = raw.reduce((sum, i) => sum + i.ratio, 0)
+  if (total <= 0) return []
+
+  const circumference = 2 * Math.PI * 40
+  let accumulatedOffset = 0
+
+  return raw.map(item => {
+    const part = item.ratio / total
+    const dashLength = circumference * part
+    const dashArray = `${dashLength} ${circumference - dashLength}`
+    const offset = -accumulatedOffset
+    accumulatedOffset += dashLength
+    return { ...item, dashArray, offset }
+  })
+})
+
 // [WHAT] 打开公告链接
 function openAnnouncement(url: string) {
   if (url) {
@@ -753,21 +778,23 @@ function formatPercent(num: number): string {
       
       <!-- 核心指标 -->
       <div class="core-metrics" v-if="!isLoading">
-        <div class="main-row">
-          <div class="main-change">
-            <div class="change-label">当日涨幅 {{ fundInfo?.gztime?.slice(5, 10) || '--' }}</div>
-            <div class="change-value" :class="isUp ? 'up' : 'down'">
+        <div class="headline-metrics">
+          <div class="headline-item">
+            <div class="headline-label">当日涨幅 {{ fundInfo?.gztime?.slice(5, 10) || '--' }}</div>
+            <div class="headline-value" :class="isUp ? 'up' : 'down'">
               {{ formatPercent(priceChangePercent) }}
             </div>
           </div>
-          <div class="side-metrics">
-            <div class="side-item">
-              <div class="side-label">估算净值</div>
-              <div class="side-value">{{ fundInfo?.gsz || '--' }}</div>
+          <div class="headline-item">
+            <div class="headline-label">估算净值</div>
+            <div class="headline-value">
+              {{ fundInfo?.gsz || '--' }}
             </div>
-            <div class="side-item">
-              <div class="side-label">昨日净值</div>
-              <div class="side-value">{{ fundInfo?.dwjz || '--' }}</div>
+          </div>
+          <div class="headline-item">
+            <div class="headline-label">昨日净值</div>
+            <div class="headline-value">
+              {{ fundInfo?.dwjz || '--' }}
             </div>
           </div>
         </div>
@@ -1261,34 +1288,30 @@ function formatPercent(num: number): string {
       <div class="section-header">
         <span>资产配置</span>
       </div>
-      <div class="asset-bars">
-        <div class="asset-item" v-if="assetAllocation.stock > 0">
-          <span class="asset-label">股票</span>
-          <div class="asset-bar">
-            <div class="bar-fill stock" :style="{ width: assetAllocation.stock + '%' }"></div>
-          </div>
-          <span class="asset-value">{{ assetAllocation.stock }}%</span>
+      <div class="asset-chart" v-if="assetPieData.length > 0">
+        <div class="asset-pie-wrap">
+          <svg viewBox="0 0 100 100" class="asset-pie">
+            <circle
+              v-for="item in assetPieData"
+              :key="item.name"
+              cx="50"
+              cy="50"
+              r="40"
+              fill="transparent"
+              :stroke="item.color"
+              stroke-width="20"
+              :stroke-dasharray="item.dashArray"
+              :stroke-dashoffset="item.offset"
+              :style="{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%' }"
+            />
+          </svg>
         </div>
-        <div class="asset-item" v-if="assetAllocation.bond > 0">
-          <span class="asset-label">债券</span>
-          <div class="asset-bar">
-            <div class="bar-fill bond" :style="{ width: assetAllocation.bond + '%' }"></div>
+        <div class="asset-legend">
+          <div v-for="item in assetPieData" :key="item.name" class="asset-legend-item">
+            <span class="legend-dot" :style="{ background: item.color }"></span>
+            <span class="legend-name">{{ item.name }}</span>
+            <span class="legend-ratio">{{ item.ratio.toFixed(2) }}%</span>
           </div>
-          <span class="asset-value">{{ assetAllocation.bond }}%</span>
-        </div>
-        <div class="asset-item" v-if="assetAllocation.cash > 0">
-          <span class="asset-label">现金</span>
-          <div class="asset-bar">
-            <div class="bar-fill cash" :style="{ width: assetAllocation.cash + '%' }"></div>
-          </div>
-          <span class="asset-value">{{ assetAllocation.cash }}%</span>
-        </div>
-        <div class="asset-item" v-if="assetAllocation.other > 0">
-          <span class="asset-label">其他</span>
-          <div class="asset-bar">
-            <div class="bar-fill other" :style="{ width: assetAllocation.other + '%' }"></div>
-          </div>
-          <span class="asset-value">{{ assetAllocation.other }}%</span>
         </div>
       </div>
     </div>
@@ -1633,65 +1656,42 @@ function formatPercent(num: number): string {
   padding: 40px;
 }
 
-.main-row {
+.headline-metrics {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 138px;
-  gap: 12px;
-  align-items: stretch;
-  margin-bottom: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.main-change {
-  min-width: 0;
-}
-
-.change-label {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.change-value {
-  font-size: 42px;
-  font-weight: 700;
-  font-family: 'DIN Alternate', -apple-system, monospace;
-  color: var(--text-primary);
-}
-
-.change-value.up {
-  color: #f56c6c;
-}
-
-.change-value.down {
-  color: #67c23a;
-}
-
-.side-metrics {
-  display: grid;
-  grid-template-rows: 1fr 1fr;
-  gap: 8px;
-}
-
-.side-item {
+.headline-item {
   background: var(--bg-tertiary);
   border-radius: 8px;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  min-height: 66px;
+  justify-content: space-between;
 }
 
-.side-label {
-  font-size: 11px;
+.headline-label {
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
-.side-value {
-  margin-top: 4px;
-  font-size: 15px;
+.headline-value {
+  margin-top: 8px;
+  font-size: 20px;
   font-weight: 600;
   font-family: 'DIN Alternate', -apple-system, monospace;
   color: var(--text-primary);
+}
+
+.headline-value.up {
+  color: #f56c6c;
+}
+
+.headline-value.down {
+  color: #67c23a;
 }
 
 .sub-metrics {
@@ -2150,58 +2150,67 @@ function formatPercent(num: number): string {
 
 /* ========== 费率信息 ========== */
 .fee-grid {
-  display: flex;
-  padding: 12px 16px;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 14px 16px;
+  gap: 10px;
   border-bottom: 1px solid var(--border-color);
 }
 
 .fee-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 10px;
 }
 
 .fee-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
 .fee-value {
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'DIN Alternate', -apple-system, monospace;
   color: var(--text-primary);
 }
 
 .fee-table {
-  padding: 12px 16px;
+  margin: 10px 12px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
 }
 
 .fee-table:last-of-type {
-  border-bottom: none;
+  margin-bottom: 14px;
 }
 
 .table-title {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .table-row {
   display: flex;
   justify-content: space-between;
-  padding: 6px 0;
+  padding: 7px 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
 .table-row.header {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 11px;
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 8px;
+  padding-bottom: 10px;
   margin-bottom: 4px;
 }
 
@@ -2225,8 +2234,11 @@ function formatPercent(num: number): string {
 }
 
 .redemption-estimate {
-  padding: 12px 16px;
+  margin: 10px 12px 14px;
+  padding: 12px;
   background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -2382,52 +2394,54 @@ function formatPercent(num: number): string {
 }
 
 /* ========== 资产配置 ========== */
-.asset-bars {
-  padding: 12px 16px;
-}
-
-.asset-item {
+.asset-chart {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  padding: 16px;
+  gap: 20px;
 }
 
-.asset-item:last-child {
-  margin-bottom: 0;
+.asset-pie-wrap {
+  width: 120px;
+  height: 120px;
+  flex-shrink: 0;
 }
 
-.asset-label {
-  width: 36px;
+.asset-pie {
+  width: 100%;
+  height: 100%;
+}
+
+.asset-legend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.asset-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.asset-legend .legend-name {
+  flex: 1;
   color: var(--text-secondary);
 }
 
-.asset-bar {
-  flex: 1;
-  height: 8px;
-  background: var(--bg-primary);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.3s;
-}
-
-.bar-fill.stock { background: #3b82f6; }
-.bar-fill.bond { background: #22c55e; }
-.bar-fill.cash { background: #f59e0b; }
-.bar-fill.other { background: #8b5cf6; }
-
-.asset-value {
-  width: 45px;
-  text-align: right;
-  font-size: 12px;
-  font-weight: 500;
+.legend-ratio {
+  font-weight: 600;
   color: var(--text-primary);
+  font-family: 'DIN Alternate', -apple-system, monospace;
 }
 
 /* ========== 基金评级 ========== */

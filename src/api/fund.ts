@@ -492,34 +492,60 @@ export async function fetchStockHoldings(code: string): Promise<StockHolding[]> 
 function parseStockHoldingsHtml(html: string): StockHolding[] {
   const holdings: StockHolding[] = []
   
-  // [HOW] 使用正则匹配 HTML 表格中的数据
-  // 格式：<td><a href="...">股票名称</a></td><td>占比</td>...
+  const toText = (raw: string): string => {
+    return raw
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&#37;/g, '%')
+      .trim()
+  }
+
+  // [HOW] 匹配表格行，兼容新版基金F10重仓股HTML结构
   const tableRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi
   const rows = html.match(tableRegex) || []
   
   for (const row of rows) {
     // 跳过表头
     if (row.includes('<th')) continue
-    
-    // 提取股票代码
-    const codeMatch = row.match(/quote_(\d{6})\.html/i)
-    // 提取股票名称
-    const nameMatch = row.match(/<a[^>]*>([^<]+)<\/a>/i)
-    // 提取持仓占比（第四列）
-    const tdRegex = /<td[^>]*>([^<]*)<\/td>/gi
-    const tds: string[] = []
-    let tdMatch
+
+    // 提取列
+    const tdsRaw: string[] = []
+    const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi
+    let tdMatch: RegExpExecArray | null
     while ((tdMatch = tdRegex.exec(row)) !== null) {
-      tds.push((tdMatch[1] || '').trim())
+      tdsRaw.push(tdMatch[1] || '')
     }
-    
-    if (codeMatch && codeMatch[1] && nameMatch && nameMatch[1] && tds.length >= 4) {
+    if (tdsRaw.length < 3) continue
+
+    const tds = tdsRaw.map(toText)
+
+    // 新版：第2列股票代码，第3列股票名称，第7列占比，第9列持仓市值
+    // 旧版：第1个链接可能含代码，后续列索引略有差异
+    let stockCode = (tds[1] || '').match(/\d{6}/)?.[0] || ''
+    if (!stockCode) {
+      const codeInHref = row.match(/unify\/r\/\d\.(\d{6})/i) || row.match(/quote_(\d{6})\.html/i)
+      stockCode = codeInHref?.[1] || ''
+    }
+    const stockName = tds[2] || ''
+
+    const ratioText = tds.find(v => v.includes('%')) || ''
+    const holdingRatio = parseFloat(ratioText.replace('%', '').replace(/,/g, '')) || 0
+
+    const amountCandidate = tds[8] || tds[2] || '0'
+    const holdingAmount = amountCandidate.replace(/,/g, '')
+
+    // 新版接口通常不直接给“较上期变化”，统一给占位符
+    const changeFromLast = tds[4] && /[-+]?[\d.]+%?/.test(tds[4]) ? tds[4] : '--'
+
+    if (stockCode && stockName && holdingRatio > 0) {
       holdings.push({
-        stockCode: codeMatch[1],
-        stockName: nameMatch[1].trim(),
-        holdingRatio: parseFloat((tds[3] || '0').replace('%', '')) || 0, // 占比
-        holdingAmount: tds[2] || '0', // 持仓市值（万元）
-        changeFromLast: tds[4] || '--' // 较上期变化
+        stockCode,
+        stockName,
+        holdingRatio,
+        holdingAmount,
+        changeFromLast
       })
     }
   }
