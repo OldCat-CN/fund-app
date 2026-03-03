@@ -36,7 +36,7 @@ function getThemeColors() {
 const chartData = ref<SimpleKLineData[]>([])
 const periodReturns = ref<PeriodReturn[]>([])
 const isLoading = ref(false)
-const activePeriod = ref('5d') // 默认显示5日K线
+const activePeriod = ref('7d') // 默认显示7日走势
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const chartMode = ref<'net' | 'change'>('net')
 const hoveredIndex = ref<number | null>(null)
@@ -53,8 +53,7 @@ const baseValue = ref(0)
 
 // [WHAT] 时间周期配置（适配基金每日净值数据）
 const periods = [
-  { key: '1d', label: '当日', days: 0 },    // 当日实时走势
-  { key: '5d', label: '5日', days: 5 },     // 近5个交易日
+  { key: '7d', label: '7日', days: 7 },     // 近7个交易日
   { key: '1m', label: '1月', days: 30 },    // 近1个月
   { key: '3m', label: '3月', days: 90 },    // 近3个月
   { key: '6m', label: '6月', days: 180 },   // 近6个月
@@ -76,7 +75,7 @@ const filteredData = computed(() => {
   const now = new Date()
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   
-  // [WHAT] 当日模式：按实时采样分时绘制
+  // [WHAT] 当日分时数据源不可用，统一按日线周期绘制
   if (showIntradayChart.value) {
     if (intradayData.value.length > 0) {
       const first = intradayData.value[0]!.value
@@ -103,8 +102,7 @@ const filteredData = computed(() => {
   
   // [WHY] 其他情况统一使用K线数据
   const period = periods.find(p => p.key === currentPeriod)
-  // 当日模式但数据不足时，显示5日K线
-  const days = (period?.days === 0 || !period) ? 5 : period.days
+  const days = period?.days || 7
   
   const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
   
@@ -140,9 +138,9 @@ const filteredData = computed(() => {
     }
   }
 
-  // [WHAT] 5日模式固定最近5个交易日
-  if (currentPeriod === '5d' && data.length > 5) {
-    data = data.slice(-5)
+  // [WHAT] 7日模式固定最近7个交易日
+  if (currentPeriod === '7d' && data.length > 7) {
+    data = data.slice(-7)
   }
   
   return data
