@@ -29,6 +29,11 @@ import {
 } from '@/utils/statistics'
 import { fetchNetValueHistoryFast } from '@/api/fundFast'
 
+type ConfirmedNavRecord = {
+  date: string
+  netValue: number
+}
+
 const route = useRoute()
 const router = useRouter()
 const fundStore = useFundStore()
@@ -45,6 +50,11 @@ const stockHoldings = ref<StockHolding[]>([])
 const periodReturns = ref<PeriodReturnExt[]>([])
 const periodReturnsBasic = ref<PeriodReturn[]>([])
 const inceptionReturn = ref<number | null>(null)
+const confirmedPeriodReturns = ref<Record<'1m' | '3m' | '1y', number | null>>({
+  '1m': null,
+  '3m': null,
+  '1y': null
+})
 const similarFunds = ref<SimilarFund[]>([])
 const sectorInfo = ref<SectorInfo | null>(null)
 const isLoading = ref(true)
@@ -162,6 +172,7 @@ watch(fundCode, async (newCode, oldCode) => {
     periodReturns.value = []
     periodReturnsBasic.value = []
     inceptionReturn.value = null
+    confirmedPeriodReturns.value = { '1m': null, '3m': null, '1y': null }
     similarFunds.value = []
     dividendRecords.value = []
     fundFees.value = null
@@ -277,6 +288,7 @@ async function loadFundData() {
     fetchPeriodReturnExt(fundCode.value).then(r => periodReturns.value = r).catch(() => {})
     calculatePeriodReturns(fundCode.value).then(r => periodReturnsBasic.value = r).catch(() => {})
     fetchNetValueHistoryFast(fundCode.value, 5000).then(history => {
+      confirmedPeriodReturns.value = calculateConfirmedPeriodReturns(history)
       if (history.length >= 2) {
         const latest = history[0]!.netValue
         const earliest = history[history.length - 1]!.netValue
@@ -314,6 +326,13 @@ const priceChangePercent = computed(() => {
 const isUp = computed(() => priceChangePercent.value >= 0)
 
 function getPeriodFundReturn(period: string): number | null {
+  if (period === '1m' || period === '3m' || period === '1y') {
+    const confirmed = confirmedPeriodReturns.value[period]
+    if (confirmed !== null && Number.isFinite(confirmed)) {
+      return confirmed
+    }
+  }
+
   const ext = periodReturns.value.find(p => p.period === period)
   if (ext && Number.isFinite(ext.fundReturn)) {
     return ext.fundReturn
@@ -342,6 +361,48 @@ const monthReturn = computed(() => getPeriodFundReturn('1m'))
 const quarterReturn = computed(() => getPeriodFundReturn('3m'))
 const yearReturn = computed(() => getPeriodFundReturn('1y'))
 const allReturn = computed(() => getPeriodFundReturn('all'))
+
+function calculateConfirmedPeriodReturns(history: ConfirmedNavRecord[]): Record<'1m' | '3m' | '1y', number | null> {
+  const empty = { '1m': null, '3m': null, '1y': null }
+  if (!history || history.length < 2) return empty
+
+  // fetchNetValueHistoryFast 返回最新在前，均为已确认净值
+  const orderedDesc = [...history].filter(i => i.netValue > 0)
+  if (orderedDesc.length < 2) return empty
+
+  const end = orderedDesc[0]!
+  const endDate = new Date(end.date)
+  if (Number.isNaN(endDate.getTime()) || end.netValue <= 0) return empty
+
+  const byKey: Array<{ key: '1m' | '3m' | '1y'; days: number }> = [
+    { key: '1m', days: 30 },
+    { key: '3m', days: 90 },
+    { key: '1y', days: 365 }
+  ]
+
+  const result: Record<'1m' | '3m' | '1y', number | null> = { ...empty }
+
+  for (const { key, days } of byKey) {
+    const targetDate = new Date(endDate)
+    targetDate.setDate(targetDate.getDate() - days)
+    const targetMs = targetDate.getTime()
+
+    // 目标日若非交易日，则取前一个交易日（即 <= targetDate 的最近记录）
+    const start = orderedDesc.find(item => {
+      const t = new Date(item.date).getTime()
+      return !Number.isNaN(t) && t <= targetMs && item.netValue > 0
+    })
+
+    if (!start || start.netValue <= 0) {
+      result[key] = null
+      continue
+    }
+
+    result[key] = ((end.netValue - start.netValue) / start.netValue) * 100
+  }
+
+  return result
+}
 
 
 // [WHAT] 加载趋势预测
