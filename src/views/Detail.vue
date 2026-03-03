@@ -49,6 +49,7 @@ const fundInfo = ref<FundEstimate | null>(null)
 // [FIX] #48 使用准确数据来同步当日涨幅
 const accurateData = ref<FundAccurateData | null>(null)
 const stockHoldings = ref<StockHolding[]>([])
+const stockHoldingsApiStatus = ref<'unknown' | 'available' | 'unavailable'>('unknown')
 const periodReturns = ref<PeriodReturnExt[]>([])
 const periodReturnsBasic = ref<PeriodReturn[]>([])
 const inceptionReturn = ref<number | null>(null)
@@ -174,6 +175,7 @@ watch(fundCode, async (newCode, oldCode) => {
   if (newCode && newCode !== oldCode) {
     fundInfo.value = null
     stockHoldings.value = []
+    stockHoldingsApiStatus.value = 'unknown'
     periodReturns.value = []
     periodReturnsBasic.value = []
     inceptionReturn.value = null
@@ -290,7 +292,15 @@ async function loadFundData() {
     }
     
     // 后台加载其他数据
-    fetchStockHoldings(fundCode.value).then(h => stockHoldings.value = h).catch(() => {})
+    fetchStockHoldings(fundCode.value)
+      .then(h => {
+        stockHoldings.value = h
+        stockHoldingsApiStatus.value = 'available'
+      })
+      .catch(() => {
+        stockHoldings.value = []
+        stockHoldingsApiStatus.value = 'unavailable'
+      })
     fetchPeriodReturnExt(fundCode.value).then(r => periodReturns.value = r).catch(() => {})
     calculatePeriodReturns(fundCode.value).then(r => periodReturnsBasic.value = r).catch(() => {})
     fetchNetValueHistoryFast(fundCode.value, 5000).then(history => {
@@ -805,14 +815,15 @@ const assetPieData = computed(() => {
 
   const radius = 38
   const circumference = 2 * Math.PI * radius
+  const segmentGap = raw.length > 1 ? 1.6 : 0
   let accumulatedOffset = 0
 
   return raw.map(item => {
     const part = item.ratio / total
-    const dashLength = circumference * part
+    const dashLength = Math.max(circumference * part - segmentGap, 0)
     const dashArray = `${dashLength} ${circumference - dashLength}`
     const offset = -accumulatedOffset
-    accumulatedOffset += dashLength
+    accumulatedOffset += dashLength + segmentGap
     return { ...item, dashArray, offset }
   })
 })
@@ -842,8 +853,8 @@ function selectAssetItem(name: string) {
 
 const assetCenterNetAsset = computed(() => {
   const netAsset = fundDetailInfo.value?.scale || 0
-  if (!Number.isFinite(netAsset) || netAsset <= 0) return null
-  return netAsset
+  if (!Number.isFinite(netAsset) || netAsset <= 0) return '--'
+  return formatAssetScale(netAsset)
 })
 
 function formatAssetScale(scale: number): string {
@@ -1349,7 +1360,7 @@ function formatPercent(num: number): string {
               fill="transparent"
               :stroke="item.color"
               stroke-width="16"
-              stroke-linecap="round"
+              stroke-linecap="butt"
               :stroke-dasharray="item.dashArray"
               :stroke-dashoffset="item.offset"
               :class="{ active: selectedAssetItem?.name === item.name }"
@@ -1359,14 +1370,8 @@ function formatPercent(num: number): string {
             />
           </svg>
           <div class="asset-center-info">
-            <template v-if="assetCenterNetAsset !== null">
-              <div class="asset-center-name">净资产</div>
-              <div class="asset-center-ratio">{{ formatAssetScale(assetCenterNetAsset) }}</div>
-            </template>
-            <template v-else-if="selectedAssetItem">
-              <div class="asset-center-name">{{ selectedAssetItem.name }}</div>
-              <div class="asset-center-ratio">{{ selectedAssetItem.ratio.toFixed(2) }}%</div>
-            </template>
+            <div class="asset-center-name">净资产</div>
+            <div class="asset-center-ratio">{{ assetCenterNetAsset }}</div>
           </div>
         </div>
         <div class="asset-legend">
@@ -1411,6 +1416,9 @@ function formatPercent(num: number): string {
         </div>
       </div>
       <div v-else class="empty-hint">暂无持仓数据</div>
+      <div class="stock-api-status">
+        接口状态：{{ stockHoldingsApiStatus === 'available' ? '可用' : stockHoldingsApiStatus === 'unavailable' ? '不可用' : '检测中' }}
+      </div>
     </div>
 
     <!-- ========== 基金评级 ========== -->
@@ -2407,6 +2415,12 @@ function formatPercent(num: number): string {
   font-size: 10px;
   color: var(--text-secondary);
   margin-top: 2px;
+}
+
+.stock-api-status {
+  padding: 0 16px 12px;
+  font-size: 11px;
+  color: var(--text-tertiary);
 }
 
 /* ========== 行业配置 ========== */
