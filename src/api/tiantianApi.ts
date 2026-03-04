@@ -718,27 +718,51 @@ export async function fetchSimilarFunds(code: string): Promise<SimilarFund[]> {
         const sameType = (window as any).swithSameType || []
         
         const result: SimilarFund[] = []
-        
-        // [WHAT] sameType 是二维数组，每个子数组是一个周期的同类排行
-        // 取年度排行
-        if (sameType[3]) {
-          sameType[3].slice(0, 5).forEach((item: string) => {
-            const parts = item.split('_')
-            if (parts.length >= 3) {
-              result.push({
-                code: parts[0] ?? '',
-                name: parts[1] ?? '',
-                yearReturn: parseFloat(parts[2] ?? '0') || 0,
-                threeYearReturn: 0,
-                scale: 0,
-                manager: ''
-              })
-            }
+        const groups: string[][] = Array.isArray(sameType)
+          ? sameType.filter((g: any) => Array.isArray(g))
+          : []
+
+        // [FIX] 只使用包含当前基金代码的分组，避免展示无关基金
+        let targetGroup: string[] = []
+        for (const group of groups) {
+          if (group.some((entry: string) => String(entry).startsWith(`${code}_`))) {
+            targetGroup = group
+            break
+          }
+        }
+        if (targetGroup.length === 0) {
+          cache.set(cacheKey, [], CACHE_TTL.FUND_INFO)
+          resolve([])
+          return
+        }
+
+        targetGroup.slice(0, 10).forEach((item: string) => {
+          const parts = item.split('_')
+          if (parts.length < 3) return
+          const itemCode = parts[0] ?? ''
+          const name = parts[1] ?? ''
+          const yearReturn = parseFloat(parts[2] ?? '0') || 0
+          if (!itemCode || !name) return
+          result.push({
+            code: itemCode,
+            name,
+            yearReturn,
+            threeYearReturn: 0,
+            scale: 0,
+            manager: ''
           })
+        })
+
+        // [FIX] 优先展示同类对比，排除当前基金自身
+        const dedup = new Map<string, SimilarFund>()
+        for (const item of result) {
+          if (item.code === code) continue
+          if (!dedup.has(item.code)) dedup.set(item.code, item)
         }
         
-        cache.set(cacheKey, result, CACHE_TTL.FUND_INFO)
-        resolve(result)
+        const finalResult = Array.from(dedup.values()).slice(0, 5)
+        cache.set(cacheKey, finalResult, CACHE_TTL.FUND_INFO)
+        resolve(finalResult)
       } catch {
         resolve([])
       }

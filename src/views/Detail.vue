@@ -14,7 +14,7 @@ import {
   type IndustryAllocation, type AssetAllocation, type FundRating, type FundAccurateData, type PeriodReturn
 } from '@/api/fundFast'
 import { 
-  fetchPeriodReturnExt, fetchSimilarFunds, fetchSectorFunds, 
+  fetchPeriodReturnExt, fetchSimilarFunds, 
   fetchDividendRecords, fetchFundFees, fetchFundAnnouncements, fetchFundScale,
   calculateRedemptionFee,
   type PeriodReturnExt, type SimilarFund, type SectorInfo,
@@ -296,10 +296,12 @@ async function loadFundData() {
       .then(h => {
         stockHoldings.value = h
         stockHoldingsApiStatus.value = 'available'
+        sectorInfo.value = buildSectorInfoFromHoldings(h)
       })
       .catch(() => {
         stockHoldings.value = []
         stockHoldingsApiStatus.value = 'unavailable'
+        sectorInfo.value = null
       })
     fetchPeriodReturnExt(fundCode.value).then(r => periodReturns.value = r).catch(() => {})
     calculatePeriodReturns(fundCode.value).then(r => periodReturnsBasic.value = r).catch(() => {})
@@ -314,7 +316,6 @@ async function loadFundData() {
       }
     }).catch(() => {})
     fetchSimilarFunds(fundCode.value).then(f => similarFunds.value = f).catch(() => {})
-    fetchSectorFunds().then(s => { if (s.length > 0) sectorInfo.value = s[0]! }).catch(() => {})
     
     // [WHAT] 加载行业配置和评级数据
     fetchIndustryAllocation(fundCode.value).then(i => industryAllocation.value = i).catch(() => {})
@@ -756,6 +757,33 @@ function goToSimilarFund(code: string) {
 function searchSimilarFunds() {
   if (sectorInfo.value) {
     router.push(`/search?q=${encodeURIComponent(sectorInfo.value.name)}`)
+  }
+}
+
+function buildSectorInfoFromHoldings(holdings: StockHolding[]): SectorInfo | null {
+  if (!holdings || holdings.length === 0) return null
+
+  const sectorMap = new Map<string, { ratio: number; changeSum: number; count: number }>()
+  holdings.forEach((item) => {
+    const sector = item.sector || '其他'
+    const current = sectorMap.get(sector) || { ratio: 0, changeSum: 0, count: 0 }
+    current.ratio += item.holdingRatio || 0
+    current.changeSum += item.dayChange || 0
+    current.count += 1
+    sectorMap.set(sector, current)
+  })
+
+  const top = Array.from(sectorMap.entries()).sort((a, b) => b[1].ratio - a[1].ratio)[0]
+  if (!top) return null
+  const [name, stats] = top
+  const dayReturn = stats.count > 0 ? stats.changeSum / stats.count : 0
+
+  return {
+    code: name,
+    name,
+    streak: `持仓占比${stats.ratio.toFixed(2)}%`,
+    dayReturn,
+    funds: []
   }
 }
 
