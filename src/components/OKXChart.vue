@@ -317,7 +317,7 @@ function formatHoverTimeLabel(time: string): string {
   }
   const datePart = time.split(' ')[0] || time
   const parts = datePart.split('-')
-  if (parts.length >= 3) return `${parts[1]}-${parts[2]}`
+  if (parts.length >= 3) return `${parts[0]}-${parts[1]}-${parts[2]}`
   return datePart
 }
 
@@ -736,9 +736,11 @@ function drawChart() {
       // 分时模式：只显示时间部分
       label = point.time.split(' ')[1] || point.time.slice(-5)
     } else {
-      // K线模式：显示日期
+      // K线模式：显示完整日期 YYYY-MM-DD
       const parts = point.time.split('-')
-      label = parts.length >= 3 ? `${parts[1]}-${parts[2].split(' ')[0]}` : point.time.slice(-5)
+      label = parts.length >= 3
+        ? `${parts[0]}-${parts[1]}-${parts[2].split(' ')[0]}`
+        : point.time.slice(0, 10)
     }
     ctx.fillText(label, x, height - 5)
   }
@@ -749,7 +751,9 @@ function drawChart() {
     const firstPoint = data[0]!
     const dateStr = firstPoint.time.split(' ')[0] || firstPoint.time
     const dateParts = dateStr.split('-')
-    const displayDate = dateParts.length >= 3 ? `${dateParts[1]}-${dateParts[2]}` : dateStr
+    const displayDate = dateParts.length >= 3
+      ? `${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`
+      : dateStr
     
     // [WHY] 如果数据日期不是今天，显示提示
     if (!dateStr.includes(todayStr)) {
