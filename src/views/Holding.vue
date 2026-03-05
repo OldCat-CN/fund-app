@@ -551,9 +551,9 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   return period === 'after_15' ? '15:00后' : '15:00前'
 }
 
-function getTodayProfitBgClass(todayProfit?: number): string {
+function getHoldingItemBgClass(todayProfit?: number): string {
   if (typeof todayProfit !== 'number' || Number.isNaN(todayProfit) || todayProfit === 0) return ''
-  return todayProfit > 0 ? 'today-bg-up' : 'today-bg-down'
+  return todayProfit > 0 ? 'holding-bg-up' : 'holding-bg-down'
 }
 
 function toggleDetail() {
@@ -628,7 +628,7 @@ function displayMoney(value: number | string | undefined): string {
     >
       <template v-if="holdingStore.holdings.length > 0">
         <van-swipe-cell v-for="holding in holdingStore.holdings" :key="holding.code">
-          <div class="holding-item" @click="goToDetail(holding.code)">
+          <div class="holding-item" :class="getHoldingItemBgClass(holding.todayProfit)" @click="goToDetail(holding.code)">
             <div class="col-name">
               <div class="fund-name">{{ holding.name || '加载中...' }}</div>
               <div class="fund-code">{{ holding.code }}</div>
@@ -646,7 +646,7 @@ function displayMoney(value: number | string | undefined): string {
                 <van-button class="trade-btn history" size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
               </div>
             </div>
-            <div class="col-today" :class="[getChangeStatus(holding.todayProfit || 0), getTodayProfitBgClass(holding.todayProfit)]">
+            <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
               <div class="profit-amount">
                 {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
               </div>
@@ -1145,6 +1145,24 @@ function displayMoney(value: number | string | undefined): string {
   position: relative;
 }
 
+.holding-item.holding-bg-up {
+  background: linear-gradient(
+    100deg,
+    rgba(246, 70, 93, 0.18) 0%,
+    rgba(246, 70, 93, 0.08) 34%,
+    var(--bg-secondary) 72%
+  );
+}
+
+.holding-item.holding-bg-down {
+  background: linear-gradient(
+    100deg,
+    rgba(14, 203, 129, 0.2) 0%,
+    rgba(14, 203, 129, 0.08) 34%,
+    var(--bg-secondary) 72%
+  );
+}
+
 :deep(.swipe-delete-btn) {
   height: 100%;
 }
@@ -1275,14 +1293,6 @@ function displayMoney(value: number | string | undefined): string {
 .col-profit .profit-rate {
   font-size: 12px;
   opacity: 0.8;
-}
-
-.col-today.today-bg-up {
-  background: linear-gradient(135deg, rgba(246, 70, 93, 0.16) 0%, rgba(246, 70, 93, 0.05) 100%);
-}
-
-.col-today.today-bg-down {
-  background: linear-gradient(135deg, rgba(14, 203, 129, 0.18) 0%, rgba(14, 203, 129, 0.06) 100%);
 }
 
 .up { color: var(--color-up); }
