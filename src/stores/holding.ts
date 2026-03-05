@@ -58,6 +58,11 @@ interface UpdateTradeRecordPayload {
   shares?: number
 }
 
+interface ResolvedTradeNav {
+  nav: number
+  navDate: string
+}
+
 const PENDING_TRADE_KEY = 'fund_pending_holding_trades'
 const HOLDING_TRADE_KEY = 'fund_holding_trade_records'
 
@@ -214,15 +219,17 @@ export const useHoldingStore = defineStore('holding', () => {
         codes.map(code => fetchFundAccurateData(code).catch(() => null))
       )
       
-      results.forEach((data, index) => {
+      for (let index = 0; index < results.length; index += 1) {
+        const data = results[index]
+        const code = codes[index]
         if (data) {
-          applyPendingTradesIfConfirmed(codes[index], data)
-          updateHoldingWithAccurateData(codes[index], data)
+          await applyPendingTradesIfConfirmed(code, data)
+          updateHoldingWithAccurateData(code, data)
         } else {
-          const item = holdings.value.find((h) => h.code === codes[index])
+          const item = holdings.value.find((h) => h.code === code)
           if (item) item.loading = false
         }
-      })
+      }
     } finally {
       isRefreshing.value = false
     }
@@ -433,22 +440,32 @@ export const useHoldingStore = defineStore('holding', () => {
     saveHoldingTradeRecords(tradeRecords.value)
   }
 
-  async function getNavByDate(code: string, date: string): Promise<number | null> {
+  async function resolveTradeNavByDate(
+    code: string,
+    date: string,
+    period: 'before_15' | 'after_15'
+  ): Promise<ResolvedTradeNav | null> {
     const targetDate = normalizeDate(date)
     if (!targetDate) return null
-    const targetTs = new Date(`${targetDate}T23:59:59`).getTime()
+    const targetTs = new Date(`${targetDate}T00:00:00`).getTime()
     const todayTs = new Date(`${todayStr()}T23:59:59`).getTime()
-    const diffDays = Math.max(30, Math.ceil((todayTs - targetTs) / (1000 * 60 * 60 * 24)) + 15)
+    const diffDays = Math.max(120, Math.ceil((todayTs - targetTs) / (1000 * 60 * 60 * 24)) + 45)
     const historyDays = Math.min(3000, diffDays)
     const history = await fetchNetValueHistoryFast(code, historyDays)
     if (!history.length) return null
 
-    const matched = history.find(item => {
+    // [WHY] 历史数据是“最新在前”，按交易时段选最近的结算净值日期
+    const matched = history.reduce<ResolvedTradeNav | null>((best, item) => {
       const ts = new Date(`${item.date}T00:00:00`).getTime()
-      return ts <= targetTs && item.netValue > 0
-    })
+      if (item.netValue <= 0) return best
+      const pass = period === 'after_15' ? ts > targetTs : ts >= targetTs
+      if (!pass) return best
+      if (!best) return { nav: item.netValue, navDate: item.date }
+      const bestTs = new Date(`${best.navDate}T00:00:00`).getTime()
+      return ts < bestTs ? { nav: item.netValue, navDate: item.date } : best
+    }, null)
 
-    return matched?.netValue || null
+    return matched
   }
 
   function updateHoldingRecord(record: HoldingRecord) {
@@ -510,28 +527,38 @@ export const useHoldingStore = defineStore('holding', () => {
     updateHoldingRecord(updated)
   }
 
-  function applyPendingTradesIfConfirmed(code: string, data: FundAccurateData) {
-    const today = todayStr()
-    if (data.navDate !== today || data.nav <= 0) return
-
+  async function applyPendingTradesIfConfirmed(code: string, data: FundAccurateData) {
+    if (data.nav <= 0 || !data.navDate) return
     const targetTrades = sortPendingTrades(
-      pendingTrades.value.filter(t => t.code === code && normalizeDate(t.date) === today)
+      pendingTrades.value.filter(t => t.code === code)
     )
     if (!targetTrades.length) return
 
+    const confirmedIds = new Set<string>()
     for (const trade of targetTrades) {
       try {
+        const tradeDate = normalizeDate(trade.date)
+        if (!tradeDate) continue
+        const isConfirmable = trade.period === 'after_15'
+          ? data.navDate > tradeDate
+          : data.navDate >= tradeDate
+        if (!isConfirmable) continue
+        const resolved = await resolveTradeNavByDate(code, tradeDate, trade.period || 'before_15')
+        const settledNav = resolved?.nav || data.nav
+        const settledDate = resolved?.navDate || tradeDate
+        if (settledNav <= 0) continue
+
         if (trade.type === 'buy') {
-          applyBuyToHolding(code, trade.amount || 0, data.nav, trade.date)
+          applyBuyToHolding(code, trade.amount || 0, settledNav, settledDate)
           addTradeRecord({
             code,
             name: trade.name,
             type: 'buy',
             date: trade.date,
             period: trade.period || 'before_15',
-            nav: data.nav,
+            nav: settledNav,
             amount: trade.amount || 0,
-            shares: data.nav > 0 ? (trade.amount || 0) / data.nav : 0
+            shares: settledNav > 0 ? (trade.amount || 0) / settledNav : 0
           })
         } else {
           applySellToHolding(code, trade.shares || 0)
@@ -541,22 +568,26 @@ export const useHoldingStore = defineStore('holding', () => {
             type: 'sell',
             date: trade.date,
             period: trade.period || 'before_15',
-            nav: data.nav,
-            amount: (trade.shares || 0) * data.nav,
+            nav: settledNav,
+            amount: (trade.shares || 0) * settledNav,
             shares: trade.shares || 0
           })
         }
+        confirmedIds.add(trade.id)
       } catch {
         // [EDGE] 异常待确认单直接跳过，避免阻塞其他持仓刷新
       }
     }
 
-    pendingTrades.value = pendingTrades.value.filter(t => !targetTrades.some(p => p.id === t.id))
-    savePendingTrades(pendingTrades.value)
+    if (confirmedIds.size > 0) {
+      pendingTrades.value = pendingTrades.value.filter(t => !confirmedIds.has(t.id))
+      savePendingTrades(pendingTrades.value)
+    }
   }
 
   async function addBuyTrade(params: {
     code: string
+    name?: string
     amount: number
     date: string
     period: 'before_15' | 'after_15'
@@ -569,16 +600,42 @@ export const useHoldingStore = defineStore('holding', () => {
     if (!code) throw new Error('基金代码不能为空')
     if (!amount || amount <= 0) throw new Error('买入金额必须大于0')
     const holding = getHoldingByCode(code)
-    if (!holding) throw new Error('未找到对应持仓')
+    const tradeName = holding?.name || params.name || code
 
     const today = todayStr()
     if (date === today) {
+      if (period === 'after_15') {
+        createPendingTrade({
+          code,
+          name: tradeName,
+          type: 'buy',
+          date,
+          period,
+          amount
+        })
+        return { pending: true }
+      }
+
       const accurateData = await fetchFundAccurateData(code).catch(() => null)
       if (accurateData && accurateData.navDate === today && accurateData.nav > 0) {
-        applyBuyToHolding(code, amount, accurateData.nav, date)
+        if (!holding) {
+          updateHoldingRecord({
+            code,
+            name: accurateData.name || tradeName,
+            shareClass: 'A',
+            amount,
+            buyNetValue: accurateData.nav,
+            shares: amount / accurateData.nav,
+            buyDate: date,
+            holdingDays: 0,
+            createdAt: Date.now()
+          })
+        } else {
+          applyBuyToHolding(code, amount, accurateData.nav, date)
+        }
         addTradeRecord({
           code,
-          name: holding.name,
+          name: accurateData.name || tradeName,
           type: 'buy',
           date,
           period,
@@ -592,7 +649,7 @@ export const useHoldingStore = defineStore('holding', () => {
 
       createPendingTrade({
         code,
-        name: holding.name,
+        name: tradeName,
         type: 'buy',
         date,
         period,
@@ -601,18 +658,33 @@ export const useHoldingStore = defineStore('holding', () => {
       return { pending: true }
     }
 
-    const nav = await getNavByDate(code, date)
-    if (!nav) throw new Error('未找到该日期可用净值')
-    applyBuyToHolding(code, amount, nav, date)
+    const settled = await resolveTradeNavByDate(code, date, period)
+    if (!settled || settled.nav <= 0) throw new Error('未找到该交易时段可用净值')
+    if (!holding) {
+      const now = Date.now()
+      updateHoldingRecord({
+        code,
+        name: tradeName,
+        shareClass: 'A',
+        amount,
+        buyNetValue: settled.nav,
+        shares: amount / settled.nav,
+        buyDate: settled.navDate,
+        holdingDays: Math.max(0, Math.ceil((now - new Date(settled.navDate).getTime()) / (1000 * 60 * 60 * 24))),
+        createdAt: now
+      })
+    } else {
+      applyBuyToHolding(code, amount, settled.nav, settled.navDate)
+    }
     addTradeRecord({
       code,
-      name: holding.name,
+      name: tradeName,
       type: 'buy',
       date,
       period,
-      nav,
+      nav: settled.nav,
       amount,
-      shares: amount / nav
+      shares: amount / settled.nav
     })
     await refreshEstimates()
     return { pending: false }
@@ -672,8 +744,8 @@ export const useHoldingStore = defineStore('holding', () => {
       return { pending: true }
     }
 
-    const nav = await getNavByDate(code, date)
-    if (!nav) throw new Error('未找到该日期可用净值')
+    const settled = await resolveTradeNavByDate(code, date, period)
+    if (!settled || settled.nav <= 0) throw new Error('未找到该交易时段可用净值')
     applySellToHolding(code, shares)
     addTradeRecord({
       code,
@@ -681,8 +753,8 @@ export const useHoldingStore = defineStore('holding', () => {
       type: 'sell',
       date,
       period,
-      nav,
-      amount: shares * nav,
+      nav: settled.nav,
+      amount: shares * settled.nav,
       shares
     })
     await refreshEstimates()

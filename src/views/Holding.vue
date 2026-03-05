@@ -411,41 +411,18 @@ async function submitTrade() {
         showToast('请输入有效买入金额')
         return
       }
-      const existingHolding = holdingStore.getHoldingByCode(tradeFormData.value.code)
-      if (!existingHolding) {
-        const accurate = await fetchFundAccurateData(tradeFormData.value.code).catch(() => null)
-        const nav = accurate?.nav || currentNetValue.value || 1
-        const shares = amount / nav
+      const result = await holdingStore.addBuyTrade({
+        code: tradeFormData.value.code,
+        name: tradeFormData.value.name,
+        amount,
+        date: tradeFormData.value.date,
+        period: tradeFormData.value.period
+      })
 
-        await holdingStore.addOrUpdateHolding({
-          code: tradeFormData.value.code,
-          name: tradeFormData.value.name || accurate?.name || tradeFormData.value.code,
-          shareClass: detectShareClass(tradeFormData.value.code, tradeFormData.value.name || ''),
-          amount,
-          buyNetValue: nav,
-          shares,
-          buyDate: tradeFormData.value.date,
-          holdingDays: 0,
-          createdAt: Date.now()
-        }, {
-          ensureInitialTradeRecord: true,
-          initialTradePeriod: tradeFormData.value.period,
-          initialTradeType: 'buy'
-        })
-        showToast('买入已记录')
+      if (result.pending) {
+        showToast('已记录买入，待基金公司确认对应净值后生效')
       } else {
-        const result = await holdingStore.addBuyTrade({
-          code: tradeFormData.value.code,
-          amount,
-          date: tradeFormData.value.date,
-          period: tradeFormData.value.period
-        })
-
-        if (result.pending) {
-          showToast('已记录买入，待基金公司确认当日净值后生效')
-        } else {
-          showToast('买入已生效')
-        }
+        showToast('买入已生效')
       }
     } else {
       const shares = parseFloat(tradeFormData.value.shares)
@@ -462,7 +439,7 @@ async function submitTrade() {
       })
 
       if (result.pending) {
-        showToast('已记录卖出，待基金公司确认当日净值后生效')
+        showToast('已记录卖出，待基金公司确认对应净值后生效')
       } else {
         showToast('卖出已生效')
       }
@@ -871,7 +848,7 @@ function displayMoney(value: number | string | undefined): string {
               readonly
             >
               <template #button>
-                <van-button size="small" @click="selectedFund = null; currentNetValue = 0">重选</van-button>
+                <van-button class="reselect-btn" size="small" @click="selectedFund = null; currentNetValue = 0">重选</van-button>
               </template>
             </van-field>
           </template>
@@ -1289,6 +1266,12 @@ function displayMoney(value: number | string | undefined): string {
   background: var(--color-info-bg);
 }
 
+.reselect-btn {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
 .add-holding-wrap {
   padding: 14px 16px 4px;
   background: var(--bg-secondary);
@@ -1383,6 +1366,12 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 :global([data-theme="dark"] .holding-page .history-tabs .van-tab--active) {
+  color: var(--text-primary);
+}
+
+:global([data-theme="dark"] .holding-page .reselect-btn) {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
   color: var(--text-primary);
 }
 
