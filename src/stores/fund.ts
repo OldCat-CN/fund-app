@@ -40,11 +40,16 @@ export const useFundStore = defineStore('fund', () => {
    */
   function initWatchlist() {
     const codes = getWatchlist()
-    watchlist.value = codes.map((code) => ({
-      code,
-      name: '',
-      loading: true
-    }))
+    const existing = new Map(watchlist.value.map(item => [item.code, item]))
+    watchlist.value = codes.map((code) => {
+      const prev = existing.get(code)
+      if (prev) return { ...prev }
+      return {
+        code,
+        name: '',
+        loading: true
+      }
+    })
     // [WHAT] 初始化后立即刷新估值
     if (codes.length > 0) {
       refreshEstimates()
@@ -173,9 +178,10 @@ export const useFundStore = defineStore('fund', () => {
   function updateFundData(code: string, data: FundEstimate) {
     const index = watchlist.value.findIndex((item) => item.code === code)
     if (index > -1) {
+      const prev = watchlist.value[index]!
       watchlist.value[index] = {
-        code: data.fundcode,
-        name: data.name,
+        code: prev.code || data.fundcode || code,
+        name: data.name || prev.name || '',
         estimateValue: data.gsz,
         estimateChange: data.gszzl,
         estimateTime: data.gztime,

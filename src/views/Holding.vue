@@ -551,6 +551,11 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   return period === 'after_15' ? '15:00后' : '15:00前'
 }
 
+function getTodayProfitBgClass(todayProfit?: number): string {
+  if (typeof todayProfit !== 'number' || Number.isNaN(todayProfit) || todayProfit === 0) return ''
+  return todayProfit > 0 ? 'today-bg-up' : 'today-bg-down'
+}
+
 function toggleDetail() {
   showDetail.value = !showDetail.value
   localStorage.setItem(SHOW_DETAIL_KEY, showDetail.value ? '1' : '0')
@@ -641,7 +646,7 @@ function displayMoney(value: number | string | undefined): string {
                 <van-button class="trade-btn history" size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
               </div>
             </div>
-            <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
+            <div class="col-today" :class="[getChangeStatus(holding.todayProfit || 0), getTodayProfitBgClass(holding.todayProfit)]">
               <div class="profit-amount">
                 {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
               </div>
@@ -691,9 +696,9 @@ function displayMoney(value: number | string | undefined): string {
     <!-- 买入/卖出弹窗 -->
     <van-popup
       v-model:show="showTradeDialog"
-      position="bottom"
+      position="center"
       round
-      :style="{ height: '52%' }"
+      :style="{ width: '92%', maxWidth: '520px', maxHeight: '82vh' }"
     >
       <div class="add-dialog">
         <div class="dialog-header">
@@ -820,9 +825,9 @@ function displayMoney(value: number | string | undefined): string {
     <!-- 添加/编辑持仓弹窗 -->
     <van-popup
       v-model:show="showAddDialog"
-      position="bottom"
+      position="center"
       round
-      :style="{ height: '75%' }"
+      :style="{ width: '92%', maxWidth: '520px', maxHeight: '86vh' }"
     >
       <div class="add-dialog">
         <div class="dialog-header">
@@ -1257,6 +1262,8 @@ function displayMoney(value: number | string | undefined): string {
 .col-today, .col-profit {
   text-align: center;
   font-size: 14px;
+  border-radius: 10px;
+  padding: 8px 6px;
 }
 
 .col-today .profit-amount,
@@ -1268,6 +1275,14 @@ function displayMoney(value: number | string | undefined): string {
 .col-profit .profit-rate {
   font-size: 12px;
   opacity: 0.8;
+}
+
+.col-today.today-bg-up {
+  background: linear-gradient(135deg, rgba(246, 70, 93, 0.16) 0%, rgba(246, 70, 93, 0.05) 100%);
+}
+
+.col-today.today-bg-down {
+  background: linear-gradient(135deg, rgba(14, 203, 129, 0.18) 0%, rgba(14, 203, 129, 0.06) 100%);
 }
 
 .up { color: var(--color-up); }

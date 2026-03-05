@@ -455,18 +455,20 @@ function submitAlert() {
   align-items: center;
   gap: 8px;
   padding: 11px 14px;
-  background: linear-gradient(135deg, rgba(25, 137, 250, 0.12) 0%, rgba(25, 137, 250, 0.04) 100%);
-  border: 1px solid rgba(25, 137, 250, 0.24);
+  background: linear-gradient(135deg, var(--bg-primary) 0%, rgba(25, 137, 250, 0.08) 100%);
+  border: 1px solid rgba(25, 137, 250, 0.28);
   border-radius: 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
+  box-shadow: 0 4px 14px rgba(25, 137, 250, 0.08);
 }
 
 .search-bar:active {
-  background: linear-gradient(135deg, rgba(25, 137, 250, 0.18) 0%, rgba(25, 137, 250, 0.08) 100%);
-  border-color: rgba(25, 137, 250, 0.38);
+  background: linear-gradient(135deg, rgba(25, 137, 250, 0.16) 0%, rgba(25, 137, 250, 0.06) 100%);
+  border-color: rgba(25, 137, 250, 0.45);
+  transform: translateY(1px);
 }
 
 /* 公告栏 */
