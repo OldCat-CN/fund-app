@@ -27,7 +27,8 @@ const formData = ref({
   code: '',
   name: '',
   amount: '', // 持仓金额
-  buyDate: '' // 买入日期
+  buyDate: '', // 买入日期
+  buyPeriod: 'before_15' as 'before_15' | 'after_15'
 })
 
 // ========== A/C类费用相关 ==========
@@ -127,7 +128,7 @@ function openAddDialog() {
   isEditing.value = false
   resetForm()
   // 默认买入日期为今天
-  formData.value.buyDate = new Date().toISOString().split('T')[0]
+  formData.value.buyDate = todayDate
   showAddDialog.value = true
 }
 
@@ -141,7 +142,8 @@ function handleEdit(code: string) {
     code: holding.code,
     name: holding.name,
     amount: holding.amount.toString(),
-    buyDate: holding.buyDate
+    buyDate: holding.buyDate,
+    buyPeriod: 'before_15'
   }
   currentNetValue.value = holding.buyNetValue
   selectedFund.value = { code: holding.code, name: holding.name, type: '', pinyin: '' }
@@ -164,7 +166,7 @@ async function handleDelete(code: string) {
 
 // [WHAT] 重置表单
 function resetForm() {
-  formData.value = { code: '', name: '', amount: '', buyDate: '' }
+  formData.value = { code: '', name: '', amount: '', buyDate: '', buyPeriod: 'before_15' }
   searchKeyword.value = ''
   searchResults.value = []
   selectedFund.value = null
@@ -300,6 +302,10 @@ async function submitForm() {
     showToast('请选择买入日期')
     return
   }
+  if (!formData.value.buyPeriod) {
+    showToast('请选择交易时段')
+    return
+  }
   
   const record: HoldingRecord = {
     code: formData.value.code,
@@ -321,7 +327,10 @@ async function submitForm() {
     lastFeeDate: shareClass.value === 'C' ? formData.value.buyDate : undefined
   }
   
-  await holdingStore.addOrUpdateHolding(record)
+  await holdingStore.addOrUpdateHolding(record, {
+    ensureInitialTradeRecord: !isEditing.value,
+    initialTradePeriod: formData.value.buyPeriod
+  })
   showToast(isEditing.value ? '修改成功' : '添加成功')
   showAddDialog.value = false
   resetForm()
@@ -606,13 +615,54 @@ function onImported(count: number) {
 
 // ========== 日期选择器 ==========
 const showDatePicker = ref(false)
+const datePickerMode = ref<'add' | 'trade' | 'tradeEdit'>('add')
+
+function toDateValues(dateStr: string): string[] {
+  const normalized = dateStr || todayDate
+  const [year, month, day] = normalized.split('-')
+  if (!year || !month || !day) return todayDate.split('-')
+  return [year, month, day]
+}
+
+const datePickerValues = computed(() => {
+  if (datePickerMode.value === 'trade') return toDateValues(tradeFormData.value.date)
+  if (datePickerMode.value === 'tradeEdit') return toDateValues(editTradeFormData.value.date)
+  return toDateValues(formData.value.buyDate)
+})
+
+const datePickerTitle = computed(() => {
+  if (datePickerMode.value === 'trade' || datePickerMode.value === 'tradeEdit') return '选择交易日期'
+  return '选择买入日期'
+})
 
 function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
   // [WHY] Vant 4 日期选择器返回 ['2024', '01', '30'] 格式
   if (selectedValues.length >= 3) {
-    formData.value.buyDate = selectedValues.join('-')
+    const date = selectedValues.join('-')
+    if (datePickerMode.value === 'trade') {
+      tradeFormData.value.date = date
+    } else if (datePickerMode.value === 'tradeEdit') {
+      editTradeFormData.value.date = date
+    } else {
+      formData.value.buyDate = date
+    }
   }
   showDatePicker.value = false
+}
+
+function openBuyDatePicker() {
+  datePickerMode.value = 'add'
+  showDatePicker.value = true
+}
+
+function openTradeDatePicker() {
+  datePickerMode.value = 'trade'
+  showDatePicker.value = true
+}
+
+function openTradeEditDatePicker() {
+  datePickerMode.value = 'tradeEdit'
+  showDatePicker.value = true
 }
 
 function formatTradePeriod(period: 'before_15' | 'after_15'): string {
@@ -786,7 +836,14 @@ function displayMoney(value: number | string | undefined): string {
             placeholder="请输入份额"
           />
 
-          <van-field v-model="tradeFormData.date" type="date" label="交易日期" />
+          <van-field
+            v-model="tradeFormData.date"
+            label="交易日期"
+            placeholder="请选择交易日期"
+            readonly
+            is-link
+            @click="openTradeDatePicker"
+          />
           <van-field label="交易时段">
             <template #input>
               <van-radio-group v-model="tradeFormData.period" direction="horizontal">
@@ -902,7 +959,14 @@ function displayMoney(value: number | string | undefined): string {
             placeholder="请输入份额"
           />
           <van-field v-model="editTradeFormData.nav" type="number" label="成交净值" placeholder="请输入成交净值" />
-          <van-field v-model="editTradeFormData.date" type="date" label="交易日期" />
+          <van-field
+            v-model="editTradeFormData.date"
+            label="交易日期"
+            placeholder="请选择交易日期"
+            readonly
+            is-link
+            @click="openTradeEditDatePicker"
+          />
           <van-field label="交易时段">
             <template #input>
               <van-radio-group v-model="editTradeFormData.period" direction="horizontal">
@@ -1054,8 +1118,17 @@ function displayMoney(value: number | string | undefined): string {
             placeholder="请选择买入日期"
             readonly
             is-link
-            @click="showDatePicker = true"
+            @click="openBuyDatePicker"
           />
+
+          <van-field v-if="!isEditing" label="交易时段">
+            <template #input>
+              <van-radio-group v-model="formData.buyPeriod" direction="horizontal">
+                <van-radio name="before_15">15:00前</van-radio>
+                <van-radio name="after_15">15:00后</van-radio>
+              </van-radio-group>
+            </template>
+          </van-field>
 
           <!-- 计算结果展示 -->
           <div v-if="calculatedShares > 0" class="calc-result">
@@ -1081,7 +1154,8 @@ function displayMoney(value: number | string | undefined): string {
     <!-- 日期选择器 -->
     <van-popup v-model:show="showDatePicker" position="bottom">
       <van-date-picker
-        title="选择买入日期"
+        :title="datePickerTitle"
+        :model-value="datePickerValues"
         :max-date="new Date()"
         @confirm="onDateConfirm"
         @cancel="showDatePicker = false"

@@ -308,7 +308,14 @@ export const useHoldingStore = defineStore('holding', () => {
    * 添加或更新持仓
    * @param record 持仓记录
    */
-  async function addOrUpdateHolding(record: HoldingRecord) {
+  async function addOrUpdateHolding(
+    record: HoldingRecord,
+    options?: {
+      ensureInitialTradeRecord?: boolean
+      initialTradePeriod?: 'before_15' | 'after_15'
+    }
+  ) {
+    const isNewHolding = holdings.value.findIndex((h) => h.code === record.code) === -1
     upsertHolding(record)
     
     // [WHAT] 更新内存中的数据
@@ -323,6 +330,23 @@ export const useHoldingStore = defineStore('holding', () => {
         ...record,
         loading: true
       })
+    }
+
+    const shouldEnsureInitialTradeRecord = options?.ensureInitialTradeRecord ?? isNewHolding
+    if (shouldEnsureInitialTradeRecord) {
+      const hasTradeRecord = tradeRecords.value.some(t => t.code === record.code)
+      if (!hasTradeRecord && record.amount > 0 && record.shares > 0 && record.buyNetValue > 0) {
+        addTradeRecord({
+          code: record.code,
+          name: record.name,
+          type: 'buy',
+          date: normalizeDate(record.buyDate) || todayStr(),
+          period: options?.initialTradePeriod || 'before_15',
+          nav: record.buyNetValue,
+          amount: record.amount,
+          shares: record.shares
+        })
+      }
     }
     
     // 刷新估值

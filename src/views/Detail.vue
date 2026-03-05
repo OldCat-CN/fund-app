@@ -104,6 +104,8 @@ const tradeFormData = ref({
   date: new Date().toISOString().split('T')[0] || '',
   period: 'before_15' as 'before_15' | 'after_15'
 })
+const todayDate = new Date().toISOString().split('T')[0] || ''
+const showTradeDatePicker = ref(false)
 const costFormData = ref({
   code: '',
   name: '',
@@ -742,6 +744,26 @@ async function submitTrade() {
 
 function formatTradePeriod(period: 'before_15' | 'after_15'): string {
   return period === 'after_15' ? '15:00后' : '15:00前'
+}
+
+function toDateValues(dateStr: string): string[] {
+  const normalized = dateStr || todayDate
+  const [year, month, day] = normalized.split('-')
+  if (!year || !month || !day) return todayDate.split('-')
+  return [year, month, day]
+}
+
+const tradeDatePickerValues = computed(() => toDateValues(tradeFormData.value.date))
+
+function openTradeDatePicker() {
+  showTradeDatePicker.value = true
+}
+
+function onTradeDateConfirm({ selectedValues }: { selectedValues: string[] }) {
+  if (selectedValues.length >= 3) {
+    tradeFormData.value.date = selectedValues.join('-')
+  }
+  showTradeDatePicker.value = false
 }
 
 // [WHAT] 跳转同类基金
@@ -1630,7 +1652,14 @@ function formatPercent(num: number): string {
             label="卖出份额"
             placeholder="请输入份额"
           />
-          <van-field v-model="tradeFormData.date" type="date" label="交易日期" />
+          <van-field
+            v-model="tradeFormData.date"
+            label="交易日期"
+            placeholder="请选择交易日期"
+            readonly
+            is-link
+            @click="openTradeDatePicker"
+          />
           <van-field label="交易时段">
             <template #input>
               <van-radio-group v-model="tradeFormData.period" direction="horizontal">
@@ -1650,6 +1679,16 @@ function formatPercent(num: number): string {
           </van-button>
         </div>
       </div>
+    </van-popup>
+
+    <van-popup v-model:show="showTradeDatePicker" position="bottom">
+      <van-date-picker
+        title="选择交易日期"
+        :model-value="tradeDatePickerValues"
+        :max-date="new Date()"
+        @confirm="onTradeDateConfirm"
+        @cancel="showTradeDatePicker = false"
+      />
     </van-popup>
 
     <!-- 交易记录弹窗 -->
