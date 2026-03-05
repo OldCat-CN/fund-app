@@ -1378,12 +1378,12 @@ function displayMoney(value: number | string | undefined): string {
   background: var(--bg-secondary) !important;
 }
 
-:global([data-theme="dark"] .holding-page .history-tabs) :deep(.van-tab) {
+:global([data-theme="dark"] .holding-page .history-tabs .van-tab) {
   color: var(--text-muted);
 }
 
-:global([data-theme="dark"] .holding-page .history-tabs) :deep(.van-tab--active) {
-  color: var(--text-highlight);
+:global([data-theme="dark"] .holding-page .history-tabs .van-tab--active) {
+  color: var(--text-secondary);
 }
 
 /* 深色模式：基金名称与账户资产使用默认灰色 */
@@ -1392,6 +1392,10 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 :global([data-theme="dark"] .holding-page .summary-row:first-child .summary-item:first-child .summary-value) {
+  color: var(--text-secondary) !important;
+}
+
+:global([data-theme="dark"] .holding-page .summary-value:not(.up):not(.down)) {
   color: var(--text-secondary) !important;
 }
 
@@ -1742,19 +1746,19 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 /* 深色模式专用：确保颜色更亮更清晰 */
-:global([data-theme="dark"] .holding-page .add-dialog) :deep(.van-field__label),
-:global([data-theme="dark"] .holding-page .cost-dialog) :deep(.van-field__label) {
-  color: #f0f6fc !important;
+:global([data-theme="dark"] .holding-page .add-dialog .van-field__label),
+:global([data-theme="dark"] .holding-page .cost-dialog .van-field__label) {
+  color: var(--text-secondary) !important;
 }
 
-:global([data-theme="dark"] .holding-page .add-dialog) :deep(.van-field__control),
-:global([data-theme="dark"] .holding-page .cost-dialog) :deep(.van-field__control) {
-  color: #f0f6fc !important;
-  -webkit-text-fill-color: #f0f6fc !important;
+:global([data-theme="dark"] .holding-page .add-dialog .van-field__control),
+:global([data-theme="dark"] .holding-page .cost-dialog .van-field__control) {
+  color: var(--text-secondary) !important;
+  -webkit-text-fill-color: var(--text-secondary) !important;
 }
 
-:global([data-theme="dark"] .holding-page .add-dialog) :deep(.van-field__control::placeholder),
-:global([data-theme="dark"] .holding-page .cost-dialog) :deep(.van-field__control::placeholder) {
+:global([data-theme="dark"] .holding-page .add-dialog .van-field__control::placeholder),
+:global([data-theme="dark"] .holding-page .cost-dialog .van-field__control::placeholder) {
   color: #8b949e !important;
   -webkit-text-fill-color: #8b949e !important;
 }
