@@ -524,74 +524,46 @@ function goToTrades() {
       </div>
     </div>
 
-    <!-- [FIX] #42 精简实用工具入口 -->
+    <!-- 快捷入口（从自选页迁移） -->
     <div class="section">
       <div class="section-header">
-        <span class="section-title">分析工具</span>
+        <span class="section-title">快捷入口</span>
       </div>
       
       <div class="tools-grid">
+        <div class="tool-item" @click="router.push('/search')">
+          <van-icon name="search" size="24" />
+          <span>搜索</span>
+        </div>
         <div class="tool-item" @click="router.push('/compare')">
-          <van-icon name="chart-trending-o" size="24" />
-          <span>基金对比</span>
-        </div>
-        <div class="tool-item" @click="router.push('/backtest')">
-          <van-icon name="replay" size="24" />
-          <span>回测模拟</span>
-        </div>
-        <div class="tool-item" @click="router.push('/filter')">
-          <van-icon name="filter-o" size="24" />
-          <span>基金筛选</span>
-        </div>
-        <div class="tool-item" @click="router.push('/daily-report')">
-          <van-icon name="newspaper-o" size="24" />
-          <span>AI日报</span>
+          <van-icon name="balance-o" size="24" />
+          <span>对比</span>
         </div>
         <div class="tool-item" @click="router.push('/calculator')">
-          <van-icon name="calculator-o" size="24" />
-          <span>定投计算</span>
+          <van-icon name="gold-coin-o" size="24" />
+          <span>定投</span>
+        </div>
+        <div class="tool-item" @click="router.push('/manager-rank')">
+          <van-icon name="friends-o" size="24" />
+          <span>经理</span>
+        </div>
+        <div class="tool-item" @click="router.push('/backtest')">
+          <van-icon name="chart-trending-o" size="24" />
+          <span>回测</span>
         </div>
         <div class="tool-item" @click="router.push('/report')">
           <van-icon name="description-o" size="24" />
-          <span>收益报告</span>
+          <span>报告</span>
         </div>
-        <div class="tool-item" @click="router.push('/manager-rank')">
-          <van-icon name="manager-o" size="24" />
-          <span>经理排行</span>
+        <div class="tool-item" @click="router.push('/calendar')">
+          <van-icon name="calendar-o" size="24" />
+          <span>日历</span>
         </div>
         <div class="tool-item" @click="router.push('/alerts')">
-          <van-icon name="bell-o" size="24" />
-          <span>智能提醒</span>
+          <van-icon name="bell" size="24" />
+          <span>提醒</span>
         </div>
       </div>
-    </div>
-
-    <!-- 设置区域 -->
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">设置</span>
-      </div>
-      
-      <van-cell-group :border="false">
-        <van-cell title="深色模式" center>
-          <template #right-icon>
-            <van-switch 
-              :model-value="themeStore.actualTheme === 'dark'"
-              @update:model-value="themeStore.toggleTheme()"
-              size="20px"
-            />
-          </template>
-        </van-cell>
-        <van-cell title="跟随系统" center>
-          <template #right-icon>
-            <van-switch 
-              :model-value="themeStore.mode === 'auto'"
-              @update:model-value="(v: boolean) => themeStore.setTheme(v ? 'auto' : themeStore.actualTheme)"
-              size="20px"
-            />
-          </template>
-        </van-cell>
-      </van-cell-group>
     </div>
 
     <!-- 投资提示 -->

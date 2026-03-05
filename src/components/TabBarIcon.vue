@@ -74,10 +74,8 @@ defineProps<{
     stroke-linecap="round"
     stroke-linejoin="round"
   >
-    <path d="M12 4.8c-3.8 0-6.8 2.8-6.8 6.3 0 1.8.8 3.4 2.2 4.5V19l3.2-1.8c.5.1 1 .2 1.5.2 3.8 0 6.8-2.8 6.8-6.3S15.8 4.8 12 4.8Z" />
-    <circle cx="9" cy="11.2" r="0.9" fill="currentColor" stroke="none" />
-    <circle cx="12" cy="11.2" r="0.9" fill="currentColor" stroke="none" />
-    <circle cx="15" cy="11.2" r="0.9" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="3.1" />
+    <path d="M12 3.8v2.2M12 18v2.2M20.2 12H18M6 12H3.8M17.6 6.4l-1.5 1.5M7.9 16.1l-1.5 1.5M17.6 17.6l-1.5-1.5M7.9 7.9 6.4 6.4" />
   </svg>
 </template>
 

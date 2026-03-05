@@ -73,7 +73,7 @@ const tabs = [
   { name: 'market', label: '行情', route: '/market' },
   { name: 'home', label: '自选', route: '/' },
   { name: 'analysis', label: '分析', route: '/analysis' },
-  { name: 'announcement', label: '公告', route: '/announcement' }
+  { name: 'announcement', label: '设置', route: '/announcement' }
 ] as const
 
 // [FIX] #50 从本地存储恢复上次访问的主页面

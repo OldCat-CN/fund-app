@@ -10,15 +10,17 @@ import {
   type Announcement,
   type RemoteConfig
 } from '@/api/remote'
+import { useThemeStore } from '@/stores/theme'
 import { APP_VERSION } from '@/config/version'
 import { showToast } from 'vant'
 
 const router = useRouter()
+const themeStore = useThemeStore()
 
 // [WHAT] 数据状态
 const loading = ref(true)
 const config = ref<RemoteConfig | null>(null)
-const activeTab = ref<'announcement' | 'update' | 'about'>('announcement')
+const activeTab = ref<'settings' | 'announcement' | 'update' | 'about'>('settings')
 
 // [WHAT] 更新日志（本地维护）
 const updateLogs = [
@@ -219,12 +221,19 @@ function resetReadStatus() {
     <!-- 顶部导航 -->
     <div class="page-header">
       <van-icon name="arrow-left" size="20" @click="router.back()" />
-      <span class="header-title">公告中心</span>
+      <span class="header-title">设置中心</span>
       <div class="header-placeholder"></div>
     </div>
 
     <!-- Tab 切换 -->
     <div class="tab-bar">
+      <div 
+        class="tab-item" 
+        :class="{ active: activeTab === 'settings' }"
+        @click="activeTab = 'settings'"
+      >
+        设置
+      </div>
       <div 
         class="tab-item" 
         :class="{ active: activeTab === 'announcement' }"
@@ -250,6 +259,30 @@ function resetReadStatus() {
 
     <!-- 内容区域 -->
     <div class="content-area">
+      <!-- 设置 -->
+      <div v-if="activeTab === 'settings'" class="settings-section">
+        <van-cell-group inset>
+          <van-cell title="深色模式" center>
+            <template #right-icon>
+              <van-switch 
+                :model-value="themeStore.actualTheme === 'dark'"
+                @update:model-value="themeStore.toggleTheme()"
+                size="20px"
+              />
+            </template>
+          </van-cell>
+          <van-cell title="跟随系统" center>
+            <template #right-icon>
+              <van-switch 
+                :model-value="themeStore.mode === 'auto'"
+                @update:model-value="(v: boolean) => themeStore.setTheme(v ? 'auto' : themeStore.actualTheme)"
+                size="20px"
+              />
+            </template>
+          </van-cell>
+        </van-cell-group>
+      </div>
+
       <!-- 公告列表 -->
       <div v-if="activeTab === 'announcement'" class="announcement-list">
         <van-loading v-if="loading" class="loading-state" />
@@ -413,12 +446,13 @@ function resetReadStatus() {
 .tab-bar {
   display: flex;
   background: var(--bg-secondary);
-  padding: 0 16px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
 }
 
 .tab-item {
-  flex: 1;
+  min-width: 25%;
   text-align: center;
   padding: 12px 0;
   font-size: 14px;
@@ -456,6 +490,10 @@ function resetReadStatus() {
   overscroll-behavior-y: contain;
   /* [WHY] Android WebView 需要明确的触摸行为 */
   touch-action: pan-y;
+}
+
+.settings-section {
+  padding-top: 4px;
 }
 
 /* 公告列表 */

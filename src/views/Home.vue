@@ -288,58 +288,6 @@ function submitAlert() {
       @refresh="onRefresh"
       class="fund-list-container"
     >
-      <!-- 快捷入口 -->
-      <div class="quick-actions">
-        <div class="action-item" @click="router.push('/search')">
-          <div class="action-icon">
-            <van-icon name="search" size="22" />
-          </div>
-          <span>搜索</span>
-        </div>
-        <div class="action-item" @click="router.push('/compare')">
-          <div class="action-icon">
-            <van-icon name="balance-o" size="22" />
-          </div>
-          <span>对比</span>
-        </div>
-        <div class="action-item" @click="router.push('/calculator')">
-          <div class="action-icon">
-            <van-icon name="gold-coin-o" size="22" />
-          </div>
-          <span>定投</span>
-        </div>
-        <div class="action-item" @click="router.push('/manager-rank')">
-          <div class="action-icon">
-            <van-icon name="friends-o" size="22" />
-          </div>
-          <span>经理</span>
-        </div>
-        <div class="action-item" @click="router.push('/backtest')">
-          <div class="action-icon">
-            <van-icon name="chart-trending-o" size="22" />
-          </div>
-          <span>回测</span>
-        </div>
-        <div class="action-item" @click="router.push('/report')">
-          <div class="action-icon">
-            <van-icon name="description-o" size="22" />
-          </div>
-          <span>报告</span>
-        </div>
-        <div class="action-item" @click="router.push('/calendar')">
-          <div class="action-icon">
-            <van-icon name="calendar-o" size="22" />
-          </div>
-          <span>日历</span>
-        </div>
-        <div class="action-item" @click="router.push('/alerts')">
-          <div class="action-icon">
-            <van-icon name="bell" size="22" />
-          </div>
-          <span>提醒</span>
-        </div>
-      </div>
-      
       <!-- 自选基金标题 -->
       <div class="section-header" v-if="fundStore.watchlist.length > 0">
         <span class="section-title">自选基金</span>
