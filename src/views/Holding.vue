@@ -552,7 +552,8 @@ function formatTradePeriod(period: 'before_15' | 'after_15'): string {
 }
 
 function getHoldingItemBgClass(todayProfit?: number): string {
-  if (typeof todayProfit !== 'number' || Number.isNaN(todayProfit) || todayProfit === 0) return ''
+  if (typeof todayProfit !== 'number' || Number.isNaN(todayProfit)) return ''
+  if (todayProfit === 0) return 'holding-bg-flat'
   return todayProfit > 0 ? 'holding-bg-up' : 'holding-bg-down'
 }
 
@@ -1087,15 +1088,6 @@ function displayMoney(value: number | string | undefined): string {
   color: var(--color-down);
 }
 
-/* [WHY] 标准涨跌颜色 */
-.summary-value.up {
-  color: #f56c6c;  /* 红涨 */
-}
-
-.summary-value.down {
-  color: #67c23a;  /* 绿跌 */
-}
-
 .pending-tip {
   margin-top: 12px;
   padding-top: 10px;
@@ -1159,6 +1151,15 @@ function displayMoney(value: number | string | undefined): string {
     100deg,
     rgba(14, 203, 129, 0.2) 0%,
     rgba(14, 203, 129, 0.08) 34%,
+    var(--bg-secondary) 72%
+  );
+}
+
+.holding-item.holding-bg-flat {
+  background: linear-gradient(
+    100deg,
+    rgba(139, 148, 158, 0.2) 0%,
+    rgba(139, 148, 158, 0.08) 34%,
     var(--bg-secondary) 72%
   );
 }
@@ -1264,6 +1265,7 @@ function displayMoney(value: number | string | undefined): string {
 .trade-actions :deep(.trade-btn.delete) {
   color: var(--color-up);
   border-color: var(--color-up);
+  background: var(--color-up-bg);
 }
 
 .trade-actions :deep(.trade-btn.history) {
@@ -1374,13 +1376,13 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 .share-class-tag.a {
-  background: rgba(255, 193, 7, 0.2);
-  color: #f59e0b;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .share-class-tag.c {
-  background: rgba(25, 137, 250, 0.2);
-  color: #1989fa;
+  background: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .share-class-desc {
@@ -1492,11 +1494,11 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 .history-type.switch {
-  color: #ff9800;
+  color: var(--color-warning);
 }
 
 .history-type.dividend {
-  color: #fa8c16;
+  color: var(--color-warning);
 }
 
 .history-type.modify {
@@ -1539,8 +1541,8 @@ function displayMoney(value: number | string | undefined): string {
   justify-content: space-between;
   margin: 8px 16px 0;
   padding: 10px 12px;
-  background: #f5f9ff;
-  border: 1px solid #d8e8ff;
+  background: var(--color-info-bg);
+  border: 1px solid rgba(88, 166, 255, 0.28);
   border-radius: 8px;
 }
 
@@ -1555,7 +1557,7 @@ function displayMoney(value: number | string | undefined): string {
   gap: 4px;
   border: none;
   background: transparent;
-  color: #5aa5ff;
+  color: var(--color-info);
   font-size: 14px;
   font-weight: 600;
 }
