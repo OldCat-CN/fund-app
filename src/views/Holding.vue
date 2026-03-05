@@ -3,13 +3,14 @@
 // [WHAT] 显示持仓列表、汇总统计，支持添加/编辑/删除持仓
 // [WHAT] 支持 A类/C类基金费用计算
 
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useHoldingStore } from '@/stores/holding'
-import { searchFund, fetchFundEstimate, detectShareClass, fetchFundFeeInfo, calculateBuyFee, calculateDailyServiceFee } from '@/api/fund'
-import { showConfirmDialog, showToast, showLoadingToast, closeToast } from 'vant'
+import { searchFund, detectShareClass } from '@/api/fund'
+import { fetchFundAccurateData } from '@/api/fundFast'
+import { showConfirmDialog, showToast } from 'vant'
 import { formatMoney, formatPercent, getChangeStatus } from '@/utils/format'
-import type { FundInfo, HoldingRecord, FundShareClass, FundFeeInfo } from '@/types/fund'
+import type { FundInfo, HoldingRecord, FundShareClass } from '@/types/fund'
 import ScreenshotImport from '@/components/ScreenshotImport.vue'
 
 const router = useRouter()
@@ -32,14 +33,6 @@ const formData = ref({
 
 // ========== A/C类费用相关 ==========
 const shareClass = ref<FundShareClass>('A')
-const feeInfo = ref<FundFeeInfo | null>(null)
-// A类：是否扣除买入手续费
-const deductBuyFee = ref(true)
-// A类：自定义买入费率（默认1.5%）
-const customBuyFeeRate = ref('1.5')
-// C类：销售服务费年化费率（默认0.4%）
-const serviceFeeRate = ref(0.4)
-
 // 基金搜索相关
 const searchKeyword = ref('')
 const searchResults = ref<FundInfo[]>([])
@@ -133,6 +126,7 @@ function handleEdit(code: string) {
     amount: holding.amount.toString(),
     profit: (holding.profit || 0).toFixed(2)
   }
+  shareClass.value = holding.shareClass
   currentNetValue.value = holding.buyNetValue
   selectedFund.value = { code: holding.code, name: holding.name, type: '', pinyin: '' }
   showAddDialog.value = true
@@ -160,9 +154,6 @@ function resetForm() {
   selectedFund.value = null
   currentNetValue.value = 0
   shareClass.value = 'A'
-  feeInfo.value = null
-  deductBuyFee.value = true
-  serviceFeeRate.value = 0.4
 }
 
 // [WHAT] 搜索基金
@@ -196,76 +187,30 @@ async function selectFund(fund: FundInfo) {
   
   // [WHAT] 检测份额类型（A类/C类）
   shareClass.value = detectShareClass(fund.code, fund.name)
-  
-  // [WHY] 获取当前净值和费率信息
-  showLoadingToast({ message: '获取净值...', forbidClick: true })
-  try {
-    const [estimate, fee] = await Promise.all([
-      fetchFundEstimate(fund.code),
-      fetchFundFeeInfo(fund.code)
-    ])
-    currentNetValue.value = parseFloat(estimate.gsz) || parseFloat(estimate.dwjz) || 1
-    feeInfo.value = fee
-    
-    // [WHAT] 根据费率信息更新默认费率
-    if (fee) {
-      if (shareClass.value === 'C') {
-        serviceFeeRate.value = fee.serviceFeeRate || 0.4
-      }
-    }
-    closeToast()
-  } catch {
-    closeToast()
-    // [WHY] 估值API失败时（ETF联接等），尝试从历史净值获取
-    try {
-      const { fetchSimpleKLineData } = await import('@/api/fundFast')
-      const klineData = await fetchSimpleKLineData(fund.code, 30)
-      if (klineData && klineData.length > 0) {
-        // [WHAT] 使用最新的历史净值
-        currentNetValue.value = klineData[klineData.length - 1]!.value
-        showToast('已获取历史净值')
-        return
-      }
-    } catch {
-      // 历史数据也失败
-    }
-    currentNetValue.value = 1
-    showToast('请手动输入净值')
-  }
+  currentNetValue.value = 0
+  void refreshSettledNav(fund.code)
 }
-
-// [WHAT] 计算买入手续费（仅A类）
-// [WHY] 使用用户自定义费率
-const buyFeeRate = computed(() => parseFloat(customBuyFeeRate.value) || 1.5)
-const buyFeeAmount = computed(() => {
-  if (shareClass.value !== 'A' || !deductBuyFee.value) return 0
-  const amount = parseFloat(formData.value.amount) || 0
-  const fee = amount * (buyFeeRate.value / 100)
-  return Math.round(fee * 100) / 100
-})
-
-// [WHAT] 实际用于购买的金额（扣除手续费后）
-const actualBuyAmount = computed(() => {
-  const amount = parseFloat(formData.value.amount) || 0
-  if (shareClass.value === 'A' && deductBuyFee.value) {
-    return amount - buyFeeAmount.value
-  }
-  return amount
-})
 
 // [WHAT] 计算持有份额
 const calculatedShares = computed(() => {
-  if (actualBuyAmount.value <= 0 || currentNetValue.value <= 0) return 0
-  return actualBuyAmount.value / currentNetValue.value
+  const amount = parseFloat(formData.value.amount) || 0
+  if (amount <= 0 || currentNetValue.value <= 0) return 0
+  return amount / currentNetValue.value
 })
 
-// [WHAT] 计算C类每日销售服务费预估
-const dailyServiceFee = computed(() => {
-  if (shareClass.value !== 'C') return 0
-  const shares = calculatedShares.value
-  if (shares <= 0 || currentNetValue.value <= 0) return 0
-  return calculateDailyServiceFee(shares, currentNetValue.value, serviceFeeRate.value)
-})
+async function refreshSettledNav(code: string): Promise<number> {
+  if (!code) return 0
+  try {
+    const accurate = await fetchFundAccurateData(code)
+    const settledNav = accurate.nav > 0 ? accurate.nav : 0
+    if (settledNav > 0 && formData.value.code === code) {
+      currentNetValue.value = settledNav
+    }
+    return settledNav
+  } catch {
+    return 0
+  }
+}
 
 // [WHAT] 提交表单
 async function submitForm() {
@@ -284,9 +229,13 @@ async function submitForm() {
     showToast('持有金额需大于持有收益')
     return
   }
-  const holdingShares = currentNetValue.value > 0 ? (holdingAmount / currentNetValue.value) : 0
+  let nav = currentNetValue.value
+  if (nav <= 0) {
+    nav = await refreshSettledNav(formData.value.code)
+  }
+  const holdingShares = nav > 0 ? (holdingAmount / nav) : 0
   if (holdingShares <= 0) {
-    showToast('当前净值无效，请先选择基金')
+    showToast('暂未获取到已结算净值，请稍后重试')
     return
   }
 
@@ -302,19 +251,12 @@ async function submitForm() {
     name: formData.value.name,
     shareClass: shareClass.value,
     amount: holdingCost,
-    buyNetValue: holdingCost / holdingShares,
+    buyNetValue: nav,
     shares: holdingShares,
     buyDate: keepBuyDate,
     holdingDays: keepHoldingDays,
     createdAt: Date.now(),
-    // A类基金费用字段（使用用户自定义费率）
-    buyFeeRate: shareClass.value === 'A' ? buyFeeRate.value : undefined,
-    buyFeeDeducted: shareClass.value === 'A' ? deductBuyFee.value : undefined,
-    buyFeeAmount: shareClass.value === 'A' ? buyFeeAmount.value : undefined,
-    // C类基金费用字段
-    serviceFeeRate: shareClass.value === 'C' ? serviceFeeRate.value : undefined,
-    serviceFeeDeducted: shareClass.value === 'C' ? 0 : undefined,
-    lastFeeDate: shareClass.value === 'C' ? keepBuyDate : undefined
+    lastFeeDate: undefined
   }
   
   await holdingStore.addOrUpdateHolding(record, {
@@ -445,6 +387,10 @@ function handleRouteActions() {
 
 // [WHAT] 提交买入/卖出
 async function submitTrade() {
+  if (!tradeFormData.value.code) {
+    showToast('请选择基金')
+    return
+  }
   if (!tradeFormData.value.date) {
     showToast('请选择交易日期')
     return
@@ -467,13 +413,13 @@ async function submitTrade() {
       }
       const existingHolding = holdingStore.getHoldingByCode(tradeFormData.value.code)
       if (!existingHolding) {
-        const estimate = await fetchFundEstimate(tradeFormData.value.code).catch(() => null)
-        const nav = parseFloat(estimate?.gsz || estimate?.dwjz || '') || currentNetValue.value || 1
+        const accurate = await fetchFundAccurateData(tradeFormData.value.code).catch(() => null)
+        const nav = accurate?.nav || currentNetValue.value || 1
         const shares = amount / nav
 
         await holdingStore.addOrUpdateHolding({
           code: tradeFormData.value.code,
-          name: tradeFormData.value.name || estimate?.name || tradeFormData.value.code,
+          name: tradeFormData.value.name || accurate?.name || tradeFormData.value.code,
           shareClass: detectShareClass(tradeFormData.value.code, tradeFormData.value.name || ''),
           amount,
           buyNetValue: nav,
@@ -530,10 +476,6 @@ async function submitTrade() {
 
 function openQuickBuyFromAddDialog() {
   const code = formData.value.code || selectedFund.value?.code || ''
-  if (!code) {
-    showToast('请先选择基金')
-    return
-  }
   showAddDialog.value = false
   openTradeDialog('buy', code)
 }
@@ -797,7 +739,8 @@ function displayMoney(value: number | string | undefined): string {
             <van-icon name="info-o" />
             <span>当日交易将在基金公司确认净值后自动更新，历史日期按对应净值直接更新。</span>
           </div>
-
+        </div>
+        <div class="dialog-footer">
           <van-button block type="primary" @click="submitTrade">
             确认{{ tradeType === 'buy' ? '买入' : '卖出' }}
           </van-button>
@@ -930,68 +873,6 @@ function displayMoney(value: number | string | undefined): string {
             label="基金"
             readonly
           />
-
-          <!-- 当前净值显示 -->
-          <van-field
-            v-if="currentNetValue > 0"
-            :model-value="currentNetValue.toFixed(4)"
-            label="当前净值"
-            readonly
-          />
-
-          <!-- 份额类型显示 -->
-          <van-field v-if="selectedFund || isEditing" label="份额类型" readonly>
-            <template #input>
-              <div class="share-class-display">
-                <span class="share-class-tag" :class="shareClass.toLowerCase()">{{ shareClass }}类</span>
-                <span class="share-class-desc">
-                  {{ shareClass === 'A' ? '前端收费' : '按日计提销售服务费' }}
-                </span>
-              </div>
-            </template>
-          </van-field>
-
-          <!-- A类基金：买入手续费选项 -->
-          <template v-if="shareClass === 'A' && (selectedFund || isEditing)">
-            <van-field label="买入手续费">
-              <template #input>
-                <div class="fee-option">
-                  <van-checkbox v-model="deductBuyFee" shape="square">
-                    从金额中扣除
-                  </van-checkbox>
-                  <div class="fee-rate-input">
-                    <span>费率</span>
-                    <input 
-                      v-model="customBuyFeeRate" 
-                      type="number" 
-                      step="0.01"
-                      class="fee-input"
-                    />
-                    <span>%</span>
-                  </div>
-                </div>
-              </template>
-            </van-field>
-            <div v-if="buyFeeAmount > 0" class="fee-tip">
-              <van-icon name="info-o" />
-              <span>手续费约 ¥{{ buyFeeAmount.toFixed(2) }}，实际买入 ¥{{ actualBuyAmount.toFixed(2) }}</span>
-            </div>
-          </template>
-
-          <!-- C类基金：销售服务费说明 -->
-          <template v-if="shareClass === 'C' && (selectedFund || isEditing)">
-            <van-field label="销售服务费">
-              <template #input>
-                <div class="fee-option">
-                  <span class="fee-rate">年化 {{ serviceFeeRate }}%（按日计提）</span>
-                </div>
-              </template>
-            </van-field>
-            <div v-if="dailyServiceFee > 0" class="fee-tip">
-              <van-icon name="info-o" />
-              <span>每日约扣 ¥{{ dailyServiceFee.toFixed(2) }}（不满1分按1分计）</span>
-            </div>
-          </template>
 
           <!-- 持仓金额 -->
           <van-field
