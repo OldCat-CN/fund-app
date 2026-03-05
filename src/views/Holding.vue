@@ -757,9 +757,9 @@ function displayMoney(value: number | string | undefined): string {
     <!-- 交易记录弹窗 -->
     <van-popup
       v-model:show="showTradeHistoryDialog"
-      position="bottom"
+      position="center"
       round
-      :style="{ height: '70%' }"
+      :style="{ width: '92%', maxWidth: '520px', maxHeight: '86vh' }"
     >
       <div class="trade-history-dialog">
         <div class="dialog-header">
@@ -1109,6 +1109,13 @@ function displayMoney(value: number | string | undefined): string {
   border-bottom: 1px solid var(--border-color);
 }
 
+.list-header > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
 /* 持仓列表 */
 .holding-list-container {
   /* [WHY] 使用 flex: 1 自动撑满剩余空间 */
@@ -1301,6 +1308,38 @@ function displayMoney(value: number | string | undefined): string {
 .down { color: var(--color-down); }
 .flat { color: var(--text-secondary); }
 
+:global([data-theme="dark"]) .holding-page .up {
+  color: var(--color-up-bright);
+}
+
+:global([data-theme="dark"]) .holding-page .down {
+  color: var(--color-down-bright);
+}
+
+:global([data-theme="dark"]) .holding-page .summary-value.up {
+  color: var(--color-up-bright);
+}
+
+:global([data-theme="dark"]) .holding-page .summary-value.down {
+  color: var(--color-down-bright);
+}
+
+:global([data-theme="dark"]) .holding-page .history-type.buy {
+  color: var(--color-up-bright);
+}
+
+:global([data-theme="dark"]) .holding-page .history-type.sell {
+  color: var(--color-down-bright);
+}
+
+:global([data-theme="dark"]) .holding-page .history-tabs :deep(.van-tab) {
+  color: var(--text-muted);
+}
+
+:global([data-theme="dark"]) .holding-page .history-tabs :deep(.van-tab--active) {
+  color: var(--text-highlight);
+}
+
 .action-btn {
   height: 100%;
 }
@@ -1439,6 +1478,8 @@ function displayMoney(value: number | string | undefined): string {
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
+  max-height: 86vh;
+  overflow: hidden;
 }
 
 .history-summary {
@@ -1460,8 +1501,27 @@ function displayMoney(value: number | string | undefined): string {
   border-bottom: 1px solid var(--border-light);
 }
 
+.history-tabs :deep(.van-tabs__nav) {
+  background: var(--bg-secondary);
+}
+
+.history-tabs :deep(.van-tab) {
+  color: var(--text-secondary);
+}
+
+.history-tabs :deep(.van-tab--active) {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.history-tabs :deep(.van-tabs__line) {
+  background: var(--color-primary);
+}
+
 .history-list {
   padding: 8px 0;
+  max-height: calc(86vh - 220px);
+  overflow-y: auto;
 }
 
 .history-item {
