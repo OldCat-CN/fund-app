@@ -557,6 +557,10 @@ function getHoldingItemBgClass(todayProfit?: number): string {
   return todayProfit > 0 ? 'holding-bg-up' : 'holding-bg-down'
 }
 
+function getHoldingUpdateLabel(holding: { valueSource?: 'nav' | 'estimate' | 'fallback' }): string {
+  return holding.valueSource === 'estimate' ? '预测值' : '已更新'
+}
+
 function toggleDetail() {
   showDetail.value = !showDetail.value
   localStorage.setItem(SHOW_DETAIL_KEY, showDetail.value ? '1' : '0')
@@ -636,7 +640,7 @@ function displayMoney(value: number | string | undefined): string {
               <div class="fund-meta">
                 <!-- [FIX] #49, #46 根据实际状态显示更新标识 -->
                 <span v-if="holding.loading" class="tag loading">加载中</span>
-                <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">已更新</span>
+                <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">{{ getHoldingUpdateLabel(holding) }}</span>
                 <span v-else class="tag pending">待更新</span>
                 <span class="amount">¥{{ displayMoney(holding.marketValue || holding.amount) }}</span>
               </div>
@@ -1380,6 +1384,15 @@ function displayMoney(value: number | string | undefined): string {
 
 :global([data-theme="dark"] .holding-page .history-tabs) :deep(.van-tab--active) {
   color: var(--text-highlight);
+}
+
+/* 深色模式：基金名称与账户资产使用默认灰色 */
+:global([data-theme="dark"] .holding-page .col-name .fund-name) {
+  color: var(--text-secondary) !important;
+}
+
+:global([data-theme="dark"] .holding-page .summary-row:first-child .summary-item:first-child .summary-value) {
+  color: var(--text-secondary) !important;
 }
 
 .action-btn {

@@ -103,6 +103,8 @@ export interface HoldingWithProfit extends HoldingRecord {
   todayProfit?: number
   /** 是否加载中 */
   loading?: boolean
+  /** 当前估值来源 */
+  valueSource?: 'nav' | 'estimate' | 'fallback'
 }
 
 export const useHoldingStore = defineStore('holding', () => {
@@ -242,6 +244,7 @@ export const useHoldingStore = defineStore('holding', () => {
       holdings.value[index] = {
         ...holding,
         name: data.name || holding.name,
+        valueSource: data.dataSource,
         loading: false
       }
       return
@@ -299,6 +302,7 @@ export const useHoldingStore = defineStore('holding', () => {
       todayChange: dayChangePercent.toFixed(2),
       todayProfit,
       loading: false,
+      valueSource: data.dataSource,
       shares,
       serviceFeeDeducted: holding.shareClass === 'C' ? totalServiceFee : undefined
     }
