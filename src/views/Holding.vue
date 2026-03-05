@@ -60,6 +60,10 @@ const tradeFormData = ref({
   date: '',
   period: 'before_15' as 'before_15' | 'after_15'
 })
+const tradeSearchKeyword = ref('')
+const tradeSearchResults = ref<FundInfo[]>([])
+const tradeIsSearching = ref(false)
+let tradeSearchTimer: ReturnType<typeof setTimeout> | null = null
 const todayDate = new Date().toISOString().split('T')[0] || ''
 
 // ========== 交易记录弹窗 ==========
@@ -112,6 +116,13 @@ function openAddDialog() {
   isEditing.value = false
   resetForm()
   showAddDialog.value = true
+}
+
+function buildHoldingSnapshot(holding?: { amount?: number; shares?: number }) {
+  return {
+    amount: holding?.amount || 0,
+    shares: holding?.shares || 0
+  }
 }
 
 // [WHAT] 打开编辑持仓弹窗
@@ -258,11 +269,20 @@ async function submitForm() {
     createdAt: Date.now(),
     lastFeeDate: undefined
   }
-  
+
+  const previousHolding = holdingStore.getHoldingByCode(formData.value.code)
+  const beforeSnapshot = buildHoldingSnapshot(previousHolding)
+  const afterSnapshot = buildHoldingSnapshot({ amount: record.amount, shares: record.shares })
+
   await holdingStore.addOrUpdateHolding(record, {
-    ensureInitialTradeRecord: !isEditing.value,
-    initialTradePeriod: 'before_15',
-    initialTradeType: 'modify'
+    ensureInitialTradeRecord: false
+  })
+  holdingStore.addModifyTradeRecord({
+    code: record.code,
+    name: record.name,
+    before: beforeSnapshot,
+    after: afterSnapshot,
+    date: todayDate
   })
   showToast(isEditing.value ? '修改成功' : '添加成功')
   showAddDialog.value = false
@@ -301,6 +321,7 @@ async function submitCostAdjust() {
   
   const holding = holdingStore.getHoldingByCode(costFormData.value.code)
   if (!holding) return
+  const beforeSnapshot = buildHoldingSnapshot(holding)
   
   // [WHAT] 构建更新后的持仓记录，保留原有的其他字段
   const record: HoldingRecord = {
@@ -324,6 +345,13 @@ async function submitCostAdjust() {
   }
   
   await holdingStore.addOrUpdateHolding(record)
+  holdingStore.addModifyTradeRecord({
+    code: record.code,
+    name: record.name,
+    before: beforeSnapshot,
+    after: buildHoldingSnapshot({ amount: record.amount, shares: record.shares }),
+    date: todayDate
+  })
   showToast('成本调整成功')
   showCostDialog.value = false
 }
@@ -352,7 +380,39 @@ function openTradeDialog(type: 'buy' | 'sell', code: string) {
     date: new Date().toISOString().split('T')[0] || '',
     period: 'before_15'
   }
+  tradeSearchKeyword.value = ''
+  tradeSearchResults.value = []
   showTradeDialog.value = true
+}
+
+function onTradeSearchInput() {
+  if (tradeSearchTimer) clearTimeout(tradeSearchTimer)
+  if (!tradeSearchKeyword.value.trim()) {
+    tradeSearchResults.value = []
+    return
+  }
+  tradeSearchTimer = setTimeout(async () => {
+    tradeIsSearching.value = true
+    try {
+      tradeSearchResults.value = await searchFund(tradeSearchKeyword.value, 10)
+    } finally {
+      tradeIsSearching.value = false
+    }
+  }, 300)
+}
+
+function selectTradeFund(fund: FundInfo) {
+  tradeFormData.value.code = fund.code
+  tradeFormData.value.name = fund.name
+  tradeSearchKeyword.value = ''
+  tradeSearchResults.value = []
+}
+
+function resetTradeFundSelection() {
+  tradeFormData.value.code = ''
+  tradeFormData.value.name = ''
+  tradeSearchKeyword.value = ''
+  tradeSearchResults.value = []
 }
 
 function openTradeHistoryDialog(code: string) {
@@ -459,8 +519,10 @@ function openQuickBuyFromAddDialog() {
 
 const filteredTradeHistoryItems = computed(() => {
   const items = tradeHistorySummary.value.items
-  if (activeTradeHistoryTab.value === 'all') return items
-  return items.filter(item => item.type === activeTradeHistoryTab.value)
+  const filtered = activeTradeHistoryTab.value === 'all'
+    ? items
+    : items.filter(item => item.type === activeTradeHistoryTab.value)
+  return [...filtered].sort((a, b) => b.createdAt - a.createdAt)
 })
 
 function formatTradeType(type: string): string {
@@ -476,6 +538,7 @@ function formatTradeType(type: string): string {
 }
 
 function formatTradeAmount(type: string, amount: number): string {
+  if (type === 'modify') return '--'
   if (type === 'sell' || type === 'dividend') {
     return `+${displayMoney(amount)}`
   }
@@ -483,6 +546,24 @@ function formatTradeAmount(type: string, amount: number): string {
     return `-${displayMoney(amount)}`
   }
   return displayMoney(amount)
+}
+
+function formatTradeMeta(item: {
+  type: string
+  date: string
+  period: 'before_15' | 'after_15'
+  createdAt: number
+}): string {
+  const writeTime = new Date(item.createdAt).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+  if (item.type === 'modify') {
+    return `写入时间：${writeTime}`
+  }
+  return `${item.date} · ${formatTradePeriod(item.period)} · 写入 ${writeTime}`
 }
 
 // [WHAT] 截图导入完成回调
@@ -688,7 +769,37 @@ function displayMoney(value: number | string | undefined): string {
           <van-icon name="cross" @click="showTradeDialog = false" />
         </div>
         <div class="dialog-content">
-          <van-field :model-value="`${tradeFormData.name} (${tradeFormData.code})`" label="基金" readonly />
+          <template v-if="tradeType === 'buy'">
+            <van-field
+              v-if="!tradeFormData.code"
+              v-model="tradeSearchKeyword"
+              label="选择基金"
+              placeholder="输入基金代码或名称搜索"
+              @input="onTradeSearchInput"
+            />
+            <div v-if="tradeSearchResults.length > 0" class="search-results">
+              <van-cell
+                v-for="fund in tradeSearchResults"
+                :key="fund.code"
+                :title="fund.name"
+                :label="fund.code"
+                clickable
+                @click="selectTradeFund(fund)"
+              />
+            </div>
+            <div v-else-if="tradeIsSearching" class="search-loading">搜索中...</div>
+            <van-field
+              v-if="tradeFormData.code"
+              :model-value="`${tradeFormData.name} (${tradeFormData.code})`"
+              label="基金"
+              readonly
+            >
+              <template #button>
+                <van-button class="reselect-btn" size="small" @click="resetTradeFundSelection">重选</van-button>
+              </template>
+            </van-field>
+          </template>
+          <van-field v-else :model-value="`${tradeFormData.name} (${tradeFormData.code})`" label="基金" readonly />
 
           <van-field
             v-if="tradeType === 'buy'"
@@ -783,19 +894,36 @@ function displayMoney(value: number | string | undefined): string {
             <div v-for="item in filteredTradeHistoryItems" :key="item.id" class="history-item">
               <div class="history-item-left">
                 <div class="history-type" :class="item.type">{{ formatTradeType(item.type) }}</div>
-                <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
-                <div class="history-detail">
+                <div class="history-meta">{{ formatTradeMeta(item) }}</div>
+                <template v-if="item.type === 'modify' && item.modifySnapshot && item.modifyDiff">
+                  <div class="history-detail">
+                    份额：{{ item.modifySnapshot.before.shares.toFixed(2) }}份 -> {{ item.modifySnapshot.after.shares.toFixed(2) }}份
+                  </div>
+                  <div class="history-detail">
+                    市值：{{ displayMoney(item.modifyDiff.beforeValue) }} -> {{ displayMoney(item.modifyDiff.afterValue) }}
+                  </div>
+                  <div class="history-detail">
+                    收益：{{ displayMoney(item.modifyDiff.beforeProfit) }} -> {{ displayMoney(item.modifyDiff.afterProfit) }}
+                    ｜收益率：{{ formatPercent(item.modifyDiff.beforeProfitRate) }} -> {{ formatPercent(item.modifyDiff.afterProfitRate) }}
+                  </div>
+                </template>
+                <div v-else class="history-detail">
                   {{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}
                 </div>
               </div>
               <div class="history-item-right">
-                <div class="history-amount">{{ formatTradeAmount(item.type, item.amount) }}</div>
-                <div class="history-profit" :class="getChangeStatus(item.profit)">
-                  {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
-                </div>
-                <div class="history-rate" :class="getChangeStatus(item.profit)">
-                  {{ formatPercent(item.profitRate) }}
-                </div>
+                <template v-if="item.type === 'modify'">
+                  <div class="history-note">变更记录</div>
+                </template>
+                <template v-else>
+                  <div class="history-amount">{{ formatTradeAmount(item.type, item.amount) }}</div>
+                  <div class="history-profit" :class="getChangeStatus(item.profit)">
+                    {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
+                  </div>
+                  <div class="history-rate" :class="getChangeStatus(item.profit)">
+                    {{ formatPercent(item.profitRate) }}
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -1422,6 +1550,12 @@ function displayMoney(value: number | string | undefined): string {
   border-bottom: 1px solid var(--border-color);
 }
 
+.search-loading {
+  padding: 10px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .calc-result {
   padding: 16px;
   background: var(--bg-tertiary);
@@ -1641,6 +1775,11 @@ function displayMoney(value: number | string | undefined): string {
 .history-rate {
   font-size: 12px;
   margin-top: 2px;
+}
+
+.history-note {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .quick-buy-hint {

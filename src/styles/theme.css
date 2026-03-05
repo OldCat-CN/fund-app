@@ -171,6 +171,18 @@ body {
   color: var(--text-primary) !important;
 }
 
+.van-dialog__footer {
+  border-top-color: var(--border-color) !important;
+}
+
+.van-dialog__cancel {
+  color: var(--text-secondary) !important;
+}
+
+.van-dialog__confirm {
+  color: var(--color-primary) !important;
+}
+
 .van-cell {
   background: var(--bg-secondary) !important;
   color: var(--text-primary) !important;

@@ -41,6 +41,16 @@ interface HoldingTradeRecord {
   nav: number
   amount: number
   shares: number
+  modifySnapshot?: {
+    before: {
+      amount: number
+      shares: number
+    }
+    after: {
+      amount: number
+      shares: number
+    }
+  }
   createdAt: number
 }
 
@@ -48,6 +58,14 @@ interface HoldingTradePnLRecord extends HoldingTradeRecord {
   profit: number
   profitRate: number
   mode: 'floating' | 'realized'
+  modifyDiff?: {
+    beforeValue: number
+    afterValue: number
+    beforeProfit: number
+    afterProfit: number
+    beforeProfitRate: number
+    afterProfitRate: number
+  }
 }
 
 interface UpdateTradeRecordPayload {
@@ -438,6 +456,35 @@ export const useHoldingStore = defineStore('holding', () => {
     }
     tradeRecords.value.push(record)
     saveHoldingTradeRecords(tradeRecords.value)
+  }
+
+  function addModifyTradeRecord(params: {
+    code: string
+    name: string
+    before: { amount: number; shares: number }
+    after: { amount: number; shares: number }
+    date?: string
+  }) {
+    addTradeRecord({
+      code: params.code,
+      name: params.name,
+      type: 'modify',
+      date: normalizeDate(params.date || todayStr()) || todayStr(),
+      period: 'before_15',
+      nav: params.after.shares > 0 ? params.after.amount / params.after.shares : 0,
+      amount: params.after.amount,
+      shares: params.after.shares,
+      modifySnapshot: {
+        before: {
+          amount: params.before.amount,
+          shares: params.before.shares
+        },
+        after: {
+          amount: params.after.amount,
+          shares: params.after.shares
+        }
+      }
+    })
   }
 
   async function resolveTradeNavByDate(
@@ -925,6 +972,31 @@ export const useHoldingStore = defineStore('holding', () => {
           mode: 'realized'
         })
       } else {
+        if (record.type === 'modify' && record.modifySnapshot) {
+          const before = record.modifySnapshot.before
+          const after = record.modifySnapshot.after
+          const beforeValue = latestNav > 0 ? before.shares * latestNav : before.amount
+          const afterValue = latestNav > 0 ? after.shares * latestNav : after.amount
+          const beforeProfit = beforeValue - before.amount
+          const afterProfit = afterValue - after.amount
+          const beforeProfitRate = before.amount > 0 ? (beforeProfit / before.amount) * 100 : 0
+          const afterProfitRate = after.amount > 0 ? (afterProfit / after.amount) * 100 : 0
+          items.push({
+            ...record,
+            profit: afterProfit,
+            profitRate: afterProfitRate,
+            mode: 'floating',
+            modifyDiff: {
+              beforeValue,
+              afterValue,
+              beforeProfit,
+              afterProfit,
+              beforeProfitRate,
+              afterProfitRate
+            }
+          })
+          continue
+        }
         items.push({
           ...record,
           profit: 0,
@@ -982,6 +1054,7 @@ export const useHoldingStore = defineStore('holding', () => {
     deleteTradeRecord,
     updateTradeRecord,
     getTradePnLSummaryByFund,
+    addModifyTradeRecord,
     removeHolding,
     hasHolding,
     getHoldingByCode,
