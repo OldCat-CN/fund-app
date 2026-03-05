@@ -7,7 +7,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useFundStore } from '@/stores/fund'
 import { useHoldingStore } from '@/stores/holding'
-import { fetchStockHoldings, detectShareClass, fetchFundDetailInfo, type FundDetailInfo } from '@/api/fund'
+import { detectShareClass, fetchFundDetailInfo, type FundDetailInfo } from '@/api/fund'
 import { 
   fetchFundEstimateFast, fetchFundAccurateData, fetchIndustryAllocation, fetchAssetAllocation, fetchFundRating,
   calculatePeriodReturns,
@@ -15,9 +15,9 @@ import {
 } from '@/api/fundFast'
 import { 
   fetchPeriodReturnExt, fetchSimilarFunds, 
-  fetchDividendRecords, fetchFundFees, fetchFundAnnouncements, fetchFundScale,
+  fetchDividendRecords, fetchFundFees, fetchFundAnnouncements, fetchFundScale, fetchHoldingChanges,
   calculateRedemptionFee,
-  type PeriodReturnExt, type SimilarFund, type SectorInfo,
+  type PeriodReturnExt, type SimilarFund, type SectorInfo, type HoldingChange, type HoldingAssetType,
   type DividendRecord, type FundFeeInfo, type FundAnnouncement, type FundScale
 } from '@/api/tiantianApi'
 import type { FundEstimate, StockHolding, FundShareClass } from '@/types/fund'
@@ -48,7 +48,8 @@ const fundCode = computed(() => route.params.code as string)
 const fundInfo = ref<FundEstimate | null>(null)
 // [FIX] #48 使用准确数据来同步当日涨幅
 const accurateData = ref<FundAccurateData | null>(null)
-const stockHoldings = ref<StockHolding[]>([])
+const majorHoldings = ref<HoldingChange[]>([])
+const majorHoldingAssetType = ref<HoldingAssetType>('stock')
 const stockHoldingsApiStatus = ref<'unknown' | 'available' | 'unavailable'>('unknown')
 const periodReturns = ref<PeriodReturnExt[]>([])
 const periodReturnsBasic = ref<PeriodReturn[]>([])
@@ -176,7 +177,8 @@ onMounted(async () => {
 watch(fundCode, async (newCode, oldCode) => {
   if (newCode && newCode !== oldCode) {
     fundInfo.value = null
-    stockHoldings.value = []
+    majorHoldings.value = []
+    majorHoldingAssetType.value = 'stock'
     stockHoldingsApiStatus.value = 'unknown'
     periodReturns.value = []
     periodReturnsBasic.value = []
@@ -294,14 +296,29 @@ async function loadFundData() {
     }
     
     // 后台加载其他数据
-    fetchStockHoldings(fundCode.value)
-      .then(h => {
-        stockHoldings.value = h
+    fetchHoldingChanges(fundCode.value)
+      .then((res) => {
+        majorHoldings.value = res.items
+        majorHoldingAssetType.value = res.assetType
         stockHoldingsApiStatus.value = 'available'
-        sectorInfo.value = buildSectorInfoFromHoldings(h)
+
+        if (res.assetType === 'stock' && res.items.length > 0) {
+          const stockItems: StockHolding[] = res.items.map(item => ({
+            stockCode: item.code,
+            stockName: item.name,
+            sector: item.sector || '--',
+            dayChange: item.dayChange,
+            holdingRatio: item.ratio,
+            holdingAmount: item.marketValueText || '--',
+            changeFromLast: item.changeText || '--'
+          }))
+          sectorInfo.value = buildSectorInfoFromHoldings(stockItems)
+        } else {
+          sectorInfo.value = null
+        }
       })
       .catch(() => {
-        stockHoldings.value = []
+        majorHoldings.value = []
         stockHoldingsApiStatus.value = 'unavailable'
         sectorInfo.value = null
       })
@@ -925,6 +942,32 @@ const assetDataPeriodLabel = computed(() => {
   return `${year}年Q${quarter}`
 })
 
+const majorHoldingTitle = computed(() => {
+  if (majorHoldingAssetType.value === 'bond') return '重仓债券'
+  if (majorHoldingAssetType.value === 'fund') return '重仓基金'
+  return '重仓股票'
+})
+
+const majorHoldingNameLabel = computed(() => {
+  if (majorHoldingAssetType.value === 'bond') return '债券名称'
+  if (majorHoldingAssetType.value === 'fund') return '基金名称'
+  return '股票名称'
+})
+
+function formatMajorHoldingDiff(item: HoldingChange): string {
+  if (item.changeText) return item.changeText
+  if (item.change === null || !Number.isFinite(item.change)) return '--'
+  return `${item.change >= 0 ? '+' : ''}${item.change.toFixed(2)}%`
+}
+
+function getMajorHoldingDiffClass(item: HoldingChange): string {
+  const diffText = formatMajorHoldingDiff(item)
+  if (diffText === '新增') return 'new'
+  if (diffText.startsWith('-')) return 'down'
+  if (diffText === '--') return ''
+  return 'up'
+}
+
 // [WHAT] 打开公告链接
 function openAnnouncement(url: string) {
   if (url) {
@@ -1455,38 +1498,38 @@ function formatPercent(num: number): string {
     <!-- ========== 重仓股票 ========== -->
     <div class="info-section">
       <div class="section-header">
-        <span>重仓股票</span>
-        <span class="section-tip" v-if="stockHoldings.length > 0">
-          TOP{{ stockHoldings.length }}
+        <span>{{ majorHoldingTitle }}</span>
+        <span class="section-tip" v-if="majorHoldings.length > 0">
+          TOP{{ majorHoldings.length }}
         </span>
       </div>
-      <div v-if="stockHoldings.length > 0" class="holdings-list">
+      <div v-if="majorHoldings.length > 0" class="holdings-list">
         <div class="holding-header-row">
-          <span class="col-name">股票名称</span>
+          <span class="col-name">{{ majorHoldingNameLabel }}</span>
           <span class="col-change">涨跌幅</span>
           <span class="col-ratio">占比</span>
           <span class="col-diff">较上期</span>
         </div>
         <div 
-          v-for="(stock, idx) in stockHoldings" 
-          :key="stock.stockCode + idx"
+          v-for="(item, idx) in majorHoldings" 
+          :key="item.code + idx"
           class="holding-item"
         >
           <div class="holding-main">
-            <div class="holding-name">{{ stock.stockName }}</div>
-            <div class="holding-sub">{{ stock.sector || stock.stockCode }}</div>
+            <div class="holding-name">{{ item.name }}</div>
+            <div class="holding-sub">{{ item.sector || item.code }}</div>
           </div>
-          <div class="holding-col change" :class="(stock.dayChange || 0) >= 0 ? 'up' : 'down'">
-            {{ stock.dayChange !== undefined ? formatPercent(stock.dayChange) : '--' }}
+          <div class="holding-col change" :class="(item.dayChange || 0) >= 0 ? 'up' : 'down'">
+            {{ item.dayChange !== undefined ? formatPercent(item.dayChange) : '--' }}
           </div>
           <div class="holding-col ratio">
-            {{ stock.holdingRatio.toFixed(2) }}%
+            {{ item.ratio.toFixed(2) }}%
           </div>
           <div
             class="holding-col diff"
-            :class="stock.changeFromLast === '新增' ? 'new' : (String(stock.changeFromLast).startsWith('-') ? 'down' : 'up')"
+            :class="getMajorHoldingDiffClass(item)"
           >
-            {{ stock.changeFromLast || '--' }}
+            {{ formatMajorHoldingDiff(item) }}
           </div>
         </div>
       </div>

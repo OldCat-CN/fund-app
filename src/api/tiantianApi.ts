@@ -3,6 +3,7 @@
 // [DEPS] 使用 JSONP 和 fetch 直接请求天天基金接口
 
 import { cache, CACHE_TTL } from './cache'
+import { fetchStockHoldings } from './fund'
 
 // ========== 交易时间和持久化缓存工具 ==========
 
@@ -623,64 +624,270 @@ export async function fetchFundRating(code: string): Promise<FundRating | null> 
 
 // ========== 基金持仓变动 ==========
 
+export type HoldingAssetType = 'stock' | 'bond' | 'fund' | 'unknown'
+
 export interface HoldingChange {
-  stockCode: string
-  stockName: string
-  ratio: number         // 持仓比例%
-  change: number        // 较上期变动%
-  marketValue: number   // 持仓市值(万)
+  code: string
+  name: string
+  ratio: number               // 持仓比例%
+  change: number | null       // 较上期变动%
+  marketValue: number | null  // 持仓市值(万)
+  marketValueText: string     // 持仓市值原始文本
+  assetType: HoldingAssetType
+  dayChange?: number          // 当日涨跌幅（股票）
+  sector?: string             // 所属板块（股票）
+  changeText?: string         // 展示用变动文案
 }
 
-/**
- * 获取基金持仓变动
- * [WHY] 展示重仓股变动情况
- */
-export async function fetchHoldingChanges(code: string): Promise<HoldingChange[]> {
-  const cacheKey = `holding_change_${code}`
-  const cached = cache.get<HoldingChange[]>(cacheKey)
-  if (cached) return cached
-  
+export interface HoldingChangesResult {
+  assetType: HoldingAssetType
+  items: HoldingChange[]
+}
+
+function toPlainText(raw: string): string {
+  return raw
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#37;/g, '%')
+    .trim()
+}
+
+function parsePercentValue(raw: string): number {
+  const matched = String(raw).match(/[-+]?\d+(?:\.\d+)?(?=%)/)
+  return matched ? parseFloat(matched[0] || '0') || 0 : 0
+}
+
+function parseAmountValue(raw: string): number | null {
+  const cleaned = String(raw).replace(/,/g, '').trim()
+  if (!cleaned) return null
+  const num = parseFloat(cleaned)
+  return Number.isFinite(num) ? num : null
+}
+
+function parseChangeText(raw: string): { change: number | null; text: string } {
+  const text = String(raw || '').trim()
+  if (!text) return { change: null, text: '--' }
+  if (text.includes('新增')) return { change: null, text: '新增' }
+  const matched = text.match(/[-+]?\d+(?:\.\d+)?(?=%)/)
+  if (!matched) return { change: null, text }
+  const num = parseFloat(matched[0] || '0')
+  if (!Number.isFinite(num)) return { change: null, text }
+  return { change: num, text: `${num >= 0 ? '+' : ''}${num.toFixed(2)}%` }
+}
+
+function normalizeArchiveItems(
+  html: string,
+  type: 'jjcc' | 'zqcc'
+): { assetType: HoldingAssetType; items: HoldingChange[] } {
+  const tableMatch = html.match(/<table[^>]*>[\s\S]*?<thead>([\s\S]*?)<\/thead>[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/i)
+  if (!tableMatch) return { assetType: type === 'zqcc' ? 'bond' : 'unknown', items: [] }
+
+  const headerText = toPlainText(tableMatch[1] || '')
+  const tbody = tableMatch[2] || ''
+  const assetType: HoldingAssetType = type === 'zqcc'
+    ? 'bond'
+    : headerText.includes('基金代码')
+      ? 'fund'
+      : 'stock'
+
+  const rows: HoldingChange[] = []
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
+  let rowMatch: RegExpExecArray | null
+
+  while ((rowMatch = rowRegex.exec(tbody)) !== null) {
+    const tdsRaw: string[] = []
+    const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi
+    let tdMatch: RegExpExecArray | null
+    while ((tdMatch = tdRegex.exec(rowMatch[1] || '')) !== null) {
+      tdsRaw.push(tdMatch[1] || '')
+    }
+    if (tdsRaw.length < 4) continue
+
+    const tds = tdsRaw.map(toPlainText)
+    const code = (tds[1] || '').match(/[A-Za-z0-9.]{4,}/)?.[0] || (tds[1] || '')
+    const name = tds[2] || ''
+    const ratioRaw = tds.find(v => v.includes('%')) || ''
+    const ratio = parsePercentValue(ratioRaw)
+    const marketValueText = tds[tds.length - 1] || '--'
+    const marketValue = parseAmountValue(marketValueText)
+
+    if (!code || !name || ratio <= 0) continue
+
+    rows.push({
+      code,
+      name,
+      ratio,
+      change: null,
+      marketValue,
+      marketValueText,
+      assetType,
+      changeText: '--'
+    })
+  }
+
+  return { assetType, items: rows.slice(0, 10) }
+}
+
+async function loadFundArchiveContent(code: string, type: 'jjcc' | 'zqcc'): Promise<string> {
   return new Promise((resolve) => {
-    const scriptId = `holding_${code}_${Date.now()}`
-    
+    const scriptId = `holding_archive_${type}_${code}_${Date.now()}`
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve('')
+    }, 10000)
+
+    function cleanup() {
+      clearTimeout(timeout)
+      const s = document.getElementById(scriptId)
+      if (s && s.parentNode) s.parentNode.removeChild(s)
+    }
+
+    ;(window as any).apidata = undefined
+    const script = document.createElement('script')
+    script.id = scriptId
+    script.src = `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=${type}&code=${code}&topline=10&year=&month=&_=${Date.now()}`
+    script.onload = () => {
+      const data = (window as any).apidata
+      cleanup()
+      resolve(data?.content || '')
+    }
+    script.onerror = () => {
+      cleanup()
+      resolve('')
+    }
+    document.body.appendChild(script)
+  })
+}
+
+async function detectHoldingAssetType(code: string): Promise<HoldingAssetType> {
+  return new Promise((resolve) => {
+    const scriptId = `holding_asset_${code}_${Date.now()}`
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve('unknown')
+    }, 8000)
+
+    function cleanup() {
+      clearTimeout(timeout)
+      const s = document.getElementById(scriptId)
+      if (s && s.parentNode) s.parentNode.removeChild(s)
+    }
+
     const script = document.createElement('script')
     script.id = scriptId
     script.src = `https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`
-    
     script.onload = () => {
-      cleanup()
-      
       try {
-        // [WHAT] 从 Data_fundSharesPositions 获取持仓数据
-        const stockPositions = (window as any).Data_investPosition?.fundStocks || []
-        
-        const result: HoldingChange[] = stockPositions.slice(0, 10).map((item: any) => ({
-          stockCode: item.GPDM || '',
-          stockName: item.GPJC || '',
-          ratio: parseFloat(item.JZBL) || 0,
-          change: parseFloat(item.PCTNVCHG) || 0,
-          marketValue: parseFloat(item.GPJC) || 0
-        }))
-        
-        cache.set(cacheKey, result, CACHE_TTL.FUND_INFO)
-        resolve(result)
+        const data = (window as any).Data_assetAllocation
+        const categories = Array.isArray(data?.categories) ? data.categories : []
+        const series = Array.isArray(data?.series) ? data.series : []
+        const latest = categories.length > 0 ? categories.length - 1 : -1
+        const stock = latest >= 0 ? (Number(series[0]?.data?.[latest]) || 0) : 0
+        const bond = latest >= 0 ? (Number(series[1]?.data?.[latest]) || 0) : 0
+        const cash = latest >= 0 ? (Number(series[2]?.data?.[latest]) || 0) : 0
+        const other = Math.max(0, 100 - stock - bond - cash)
+
+        cleanup()
+        if (stock >= bond && stock >= other && stock >= 5) {
+          resolve('stock')
+          return
+        }
+        if (bond >= stock && bond >= other && bond >= 5) {
+          resolve('bond')
+          return
+        }
+        if (other >= Math.max(stock, bond, cash) && other >= 20) {
+          resolve('fund')
+          return
+        }
+        if (stock > 0) {
+          resolve('stock')
+          return
+        }
+        if (bond > 0) {
+          resolve('bond')
+          return
+        }
+        if (other > 0) {
+          resolve('fund')
+          return
+        }
+        resolve('unknown')
       } catch {
-        resolve([])
+        cleanup()
+        resolve('unknown')
       }
     }
-    
     script.onerror = () => {
       cleanup()
-      resolve([])
+      resolve('unknown')
     }
-    
-    function cleanup() {
-      const s = document.getElementById(scriptId)
-      if (s) document.body.removeChild(s)
-    }
-    
     document.body.appendChild(script)
   })
+}
+
+/**
+ * 获取基金重点持仓（按资产类型自动选择股票/债券/基金）
+ * [WHY] 联接基金/债券基金在股票持仓接口可能为空，需要按资产配置智能回退
+ */
+export async function fetchHoldingChanges(code: string): Promise<HoldingChangesResult> {
+  const cacheKey = `holding_change_v2_${code}`
+  const cached = cache.get<HoldingChangesResult>(cacheKey)
+  if (cached) return cached
+
+  const inferredType = await detectHoldingAssetType(code)
+
+  if (inferredType === 'stock') {
+    try {
+      const stocks = await fetchStockHoldings(code)
+      if (stocks.length > 0) {
+        const items: HoldingChange[] = stocks.slice(0, 10).map((item) => {
+          const parsedChange = parseChangeText(item.changeFromLast || '')
+          return {
+            code: item.stockCode,
+            name: item.stockName,
+            ratio: item.holdingRatio,
+            change: parsedChange.change,
+            marketValue: parseAmountValue(item.holdingAmount),
+            marketValueText: item.holdingAmount || '--',
+            assetType: 'stock',
+            dayChange: item.dayChange,
+            sector: item.sector,
+            changeText: parsedChange.text
+          }
+        })
+        const result: HoldingChangesResult = { assetType: 'stock', items }
+        cache.set(cacheKey, result, CACHE_TTL.FUND_INFO)
+        return result
+      }
+    } catch {
+      // [EDGE] 股票接口失败时，继续回退债券接口
+    }
+  }
+
+  const typeOrder: Array<'jjcc' | 'zqcc'> = inferredType === 'bond'
+    ? ['zqcc', 'jjcc']
+    : inferredType === 'fund'
+      ? ['jjcc', 'zqcc']
+      : ['jjcc', 'zqcc']
+
+  for (const type of typeOrder) {
+    const content = await loadFundArchiveContent(code, type)
+    if (!content) continue
+    const parsed = normalizeArchiveItems(content, type)
+    if (parsed.items.length > 0) {
+      const result: HoldingChangesResult = parsed
+      cache.set(cacheKey, result, CACHE_TTL.FUND_INFO)
+      return result
+    }
+  }
+
+  const fallbackType: HoldingAssetType = inferredType === 'unknown' ? 'stock' : inferredType
+  const fallback: HoldingChangesResult = { assetType: fallbackType, items: [] }
+  cache.set(cacheKey, fallback, CACHE_TTL.FUND_INFO)
+  return fallback
 }
 
 // ========== 同类基金对比 ==========
