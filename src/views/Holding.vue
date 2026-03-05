@@ -1340,6 +1340,13 @@ function displayMoney(value: number | string | undefined): string {
   color: var(--text-highlight);
 }
 
+/* 深色模式下行背景保持原色，不使用涨跌渐变背景 */
+:global([data-theme="dark"]) .holding-page .holding-item.holding-bg-up,
+:global([data-theme="dark"]) .holding-page .holding-item.holding-bg-down,
+:global([data-theme="dark"]) .holding-page .holding-item.holding-bg-flat {
+  background: var(--bg-secondary);
+}
+
 .action-btn {
   height: 100%;
 }
