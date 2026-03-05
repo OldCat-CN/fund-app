@@ -1116,6 +1116,10 @@ function displayMoney(value: number | string | undefined): string {
   line-height: 1;
 }
 
+.list-header .col-name {
+  justify-content: flex-start;
+}
+
 /* 持仓列表 */
 .holding-list-container {
   /* [WHY] 使用 flex: 1 自动撑满剩余空间 */
@@ -1145,6 +1149,18 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 .holding-item.holding-bg-up {
+  background: var(--bg-secondary);
+}
+
+.holding-item.holding-bg-down {
+  background: var(--bg-secondary);
+}
+
+.holding-item.holding-bg-flat {
+  background: var(--bg-secondary);
+}
+
+:global([data-theme="light"]) .holding-page .holding-item.holding-bg-up {
   background: linear-gradient(
     100deg,
     rgba(246, 70, 93, 0.18) 0%,
@@ -1153,7 +1169,7 @@ function displayMoney(value: number | string | undefined): string {
   );
 }
 
-.holding-item.holding-bg-down {
+:global([data-theme="light"]) .holding-page .holding-item.holding-bg-down {
   background: linear-gradient(
     100deg,
     rgba(14, 203, 129, 0.2) 0%,
@@ -1162,7 +1178,7 @@ function displayMoney(value: number | string | undefined): string {
   );
 }
 
-.holding-item.holding-bg-flat {
+:global([data-theme="light"]) .holding-page .holding-item.holding-bg-flat {
   background: linear-gradient(
     100deg,
     rgba(139, 148, 158, 0.2) 0%,
@@ -1304,6 +1320,20 @@ function displayMoney(value: number | string | undefined): string {
   opacity: 0.8;
 }
 
+.col-today.up .profit-amount,
+.col-today.up .profit-rate,
+.col-profit.up .profit-amount,
+.col-profit.up .profit-rate {
+  color: var(--color-up);
+}
+
+.col-today.down .profit-amount,
+.col-today.down .profit-rate,
+.col-profit.down .profit-amount,
+.col-profit.down .profit-rate {
+  color: var(--color-down);
+}
+
 .up { color: var(--color-up); }
 .down { color: var(--color-down); }
 .flat { color: var(--text-secondary); }
@@ -1324,6 +1354,20 @@ function displayMoney(value: number | string | undefined): string {
   color: var(--color-down-bright);
 }
 
+:global([data-theme="dark"]) .holding-page .col-today.up .profit-amount,
+:global([data-theme="dark"]) .holding-page .col-today.up .profit-rate,
+:global([data-theme="dark"]) .holding-page .col-profit.up .profit-amount,
+:global([data-theme="dark"]) .holding-page .col-profit.up .profit-rate {
+  color: var(--color-up-bright);
+}
+
+:global([data-theme="dark"]) .holding-page .col-today.down .profit-amount,
+:global([data-theme="dark"]) .holding-page .col-today.down .profit-rate,
+:global([data-theme="dark"]) .holding-page .col-profit.down .profit-amount,
+:global([data-theme="dark"]) .holding-page .col-profit.down .profit-rate {
+  color: var(--color-down-bright);
+}
+
 :global([data-theme="dark"]) .holding-page .history-type.buy {
   color: var(--color-up-bright);
 }
@@ -1338,13 +1382,6 @@ function displayMoney(value: number | string | undefined): string {
 
 :global([data-theme="dark"]) .holding-page .history-tabs :deep(.van-tab--active) {
   color: var(--text-highlight);
-}
-
-/* 深色模式下行背景保持原色，不使用涨跌渐变背景 */
-:global([data-theme="dark"]) .holding-page .holding-item.holding-bg-up,
-:global([data-theme="dark"]) .holding-page .holding-item.holding-bg-down,
-:global([data-theme="dark"]) .holding-page .holding-item.holding-bg-flat {
-  background: var(--bg-secondary);
 }
 
 .action-btn {
