@@ -27,8 +27,7 @@ const formData = ref({
   code: '',
   name: '',
   amount: '', // 持仓金额
-  buyDate: '', // 买入日期
-  buyPeriod: 'before_15' as 'before_15' | 'after_15'
+  profit: '' // 持有收益
 })
 
 // ========== A/C类费用相关 ==========
@@ -75,16 +74,8 @@ const showTradeHistoryDialog = ref(false)
 const historyFundCode = ref('')
 const historyFundName = ref('')
 const showDetail = ref(true)
-const showTradeEditDialog = ref(false)
-const editTradeFormData = ref({
-  id: '',
-  type: 'buy' as 'buy' | 'sell',
-  amount: '',
-  shares: '',
-  nav: '',
-  date: '',
-  period: 'before_15' as 'before_15' | 'after_15'
-})
+type TradeHistoryTab = 'all' | 'buy' | 'sell' | 'auto_invest' | 'switch' | 'dividend' | 'modify'
+const activeTradeHistoryTab = ref<TradeHistoryTab>('all')
 
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
@@ -127,8 +118,6 @@ async function onRefresh() {
 function openAddDialog() {
   isEditing.value = false
   resetForm()
-  // 默认买入日期为今天
-  formData.value.buyDate = todayDate
   showAddDialog.value = true
 }
 
@@ -142,8 +131,7 @@ function handleEdit(code: string) {
     code: holding.code,
     name: holding.name,
     amount: holding.amount.toString(),
-    buyDate: holding.buyDate,
-    buyPeriod: 'before_15'
+    profit: (holding.profit || 0).toFixed(2)
   }
   currentNetValue.value = holding.buyNetValue
   selectedFund.value = { code: holding.code, name: holding.name, type: '', pinyin: '' }
@@ -166,7 +154,7 @@ async function handleDelete(code: string) {
 
 // [WHAT] 重置表单
 function resetForm() {
-  formData.value = { code: '', name: '', amount: '', buyDate: '', buyPeriod: 'before_15' }
+  formData.value = { code: '', name: '', amount: '', profit: '' }
   searchKeyword.value = ''
   searchResults.value = []
   selectedFund.value = null
@@ -279,15 +267,6 @@ const dailyServiceFee = computed(() => {
   return calculateDailyServiceFee(shares, currentNetValue.value, serviceFeeRate.value)
 })
 
-// [WHAT] 计算持仓天数
-const calculatedDays = computed(() => {
-  if (!formData.value.buyDate) return 0
-  const buyDate = new Date(formData.value.buyDate)
-  const today = new Date()
-  const diffTime = today.getTime() - buyDate.getTime()
-  return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)))
-})
-
 // [WHAT] 提交表单
 async function submitForm() {
   if (!formData.value.code) {
@@ -298,24 +277,35 @@ async function submitForm() {
     showToast('请输入有效的持仓金额')
     return
   }
-  if (!formData.value.buyDate) {
-    showToast('请选择买入日期')
+  const holdingProfit = parseFloat(formData.value.profit) || 0
+  const holdingAmount = parseFloat(formData.value.amount)
+  const holdingCost = holdingAmount - holdingProfit
+  if (holdingCost <= 0) {
+    showToast('持有金额需大于持有收益')
     return
   }
-  if (!formData.value.buyPeriod) {
-    showToast('请选择交易时段')
+  const holdingShares = currentNetValue.value > 0 ? (holdingAmount / currentNetValue.value) : 0
+  if (holdingShares <= 0) {
+    showToast('当前净值无效，请先选择基金')
     return
   }
+
+  const keepBuyDate = isEditing.value
+    ? (holdingStore.getHoldingByCode(formData.value.code)?.buyDate || todayDate)
+    : todayDate
+  const keepHoldingDays = isEditing.value
+    ? (holdingStore.getHoldingByCode(formData.value.code)?.holdingDays || 0)
+    : 0
   
   const record: HoldingRecord = {
     code: formData.value.code,
     name: formData.value.name,
     shareClass: shareClass.value,
-    amount: parseFloat(formData.value.amount),
-    buyNetValue: currentNetValue.value,
-    shares: calculatedShares.value,
-    buyDate: formData.value.buyDate,
-    holdingDays: calculatedDays.value,
+    amount: holdingCost,
+    buyNetValue: holdingCost / holdingShares,
+    shares: holdingShares,
+    buyDate: keepBuyDate,
+    holdingDays: keepHoldingDays,
     createdAt: Date.now(),
     // A类基金费用字段（使用用户自定义费率）
     buyFeeRate: shareClass.value === 'A' ? buyFeeRate.value : undefined,
@@ -324,12 +314,13 @@ async function submitForm() {
     // C类基金费用字段
     serviceFeeRate: shareClass.value === 'C' ? serviceFeeRate.value : undefined,
     serviceFeeDeducted: shareClass.value === 'C' ? 0 : undefined,
-    lastFeeDate: shareClass.value === 'C' ? formData.value.buyDate : undefined
+    lastFeeDate: shareClass.value === 'C' ? keepBuyDate : undefined
   }
   
   await holdingStore.addOrUpdateHolding(record, {
     ensureInitialTradeRecord: !isEditing.value,
-    initialTradePeriod: formData.value.buyPeriod
+    initialTradePeriod: 'before_15',
+    initialTradeType: 'modify'
   })
   showToast(isEditing.value ? '修改成功' : '添加成功')
   showAddDialog.value = false
@@ -408,12 +399,12 @@ function goToDetail(code: string) {
 // [WHAT] 打开买入/卖出弹窗
 function openTradeDialog(type: 'buy' | 'sell', code: string) {
   const holding = holdingStore.getHoldingByCode(code)
-  if (!holding) return
+  if (!holding && type === 'sell') return
 
   tradeType.value = type
   tradeFormData.value = {
-    code: holding.code,
-    name: holding.name,
+    code: holding?.code || code,
+    name: holding?.name || selectedFund.value?.name || formData.value.name || '',
     amount: '',
     shares: '',
     date: new Date().toISOString().split('T')[0] || '',
@@ -427,101 +418,8 @@ function openTradeHistoryDialog(code: string) {
   if (!holding) return
   historyFundCode.value = code
   historyFundName.value = holding.name
+  activeTradeHistoryTab.value = 'all'
   showTradeHistoryDialog.value = true
-}
-
-function openTradeEditDialog(item: {
-  id: string
-  type: 'buy' | 'sell'
-  amount: number
-  shares: number
-  nav: number
-  date: string
-  period: 'before_15' | 'after_15'
-}) {
-  editTradeFormData.value = {
-    id: item.id,
-    type: item.type,
-    amount: item.amount.toString(),
-    shares: item.shares.toString(),
-    nav: item.nav.toString(),
-    date: item.date,
-    period: item.period
-  }
-  showTradeEditDialog.value = true
-}
-
-async function submitTradeEdit() {
-  const nav = parseFloat(editTradeFormData.value.nav)
-  if (!nav || nav <= 0) {
-    showToast('请输入有效净值')
-    return
-  }
-  if (!editTradeFormData.value.date) {
-    showToast('请选择交易日期')
-    return
-  }
-
-  const payload: {
-    nav: number
-    date: string
-    period: 'before_15' | 'after_15'
-    amount?: number
-    shares?: number
-  } = {
-    nav,
-    date: editTradeFormData.value.date,
-    period: editTradeFormData.value.period
-  }
-
-  if (editTradeFormData.value.type === 'buy') {
-    const amount = parseFloat(editTradeFormData.value.amount)
-    if (!amount || amount <= 0) {
-      showToast('请输入有效买入金额')
-      return
-    }
-    payload.amount = amount
-  } else {
-    const shares = parseFloat(editTradeFormData.value.shares)
-    if (!shares || shares <= 0) {
-      showToast('请输入有效卖出份额')
-      return
-    }
-    payload.shares = shares
-  }
-
-  const ok = await holdingStore.updateTradeRecord(editTradeFormData.value.id, payload)
-  if (ok) {
-    showToast('交易记录已更新')
-    showTradeEditDialog.value = false
-    if (!holdingStore.getHoldingByCode(historyFundCode.value)) {
-      showTradeHistoryDialog.value = false
-      showToast('该基金持仓已清空')
-    }
-  } else {
-    showToast('更新失败')
-  }
-}
-
-async function deleteTradeRecord(id: string) {
-  try {
-    await showConfirmDialog({
-      title: '确认删除',
-      message: '确定删除这条交易记录吗？'
-    })
-    const ok = await holdingStore.deleteTradeRecord(id)
-    if (ok) {
-      showToast('交易记录已删除')
-      if (!holdingStore.getHoldingByCode(historyFundCode.value)) {
-        showTradeHistoryDialog.value = false
-        showToast('该基金持仓已清空')
-      }
-    } else {
-      showToast('删除失败')
-    }
-  } catch {
-    // 用户取消
-  }
 }
 
 function handleRouteActions() {
@@ -567,18 +465,41 @@ async function submitTrade() {
         showToast('请输入有效买入金额')
         return
       }
+      const existingHolding = holdingStore.getHoldingByCode(tradeFormData.value.code)
+      if (!existingHolding) {
+        const estimate = await fetchFundEstimate(tradeFormData.value.code).catch(() => null)
+        const nav = parseFloat(estimate?.gsz || estimate?.dwjz || '') || currentNetValue.value || 1
+        const shares = amount / nav
 
-      const result = await holdingStore.addBuyTrade({
-        code: tradeFormData.value.code,
-        amount,
-        date: tradeFormData.value.date,
-        period: tradeFormData.value.period
-      })
-
-      if (result.pending) {
-        showToast('已记录买入，待基金公司确认当日净值后生效')
+        await holdingStore.addOrUpdateHolding({
+          code: tradeFormData.value.code,
+          name: tradeFormData.value.name || estimate?.name || tradeFormData.value.code,
+          shareClass: detectShareClass(tradeFormData.value.code, tradeFormData.value.name || ''),
+          amount,
+          buyNetValue: nav,
+          shares,
+          buyDate: tradeFormData.value.date,
+          holdingDays: 0,
+          createdAt: Date.now()
+        }, {
+          ensureInitialTradeRecord: true,
+          initialTradePeriod: tradeFormData.value.period,
+          initialTradeType: 'buy'
+        })
+        showToast('买入已记录')
       } else {
-        showToast('买入已生效')
+        const result = await holdingStore.addBuyTrade({
+          code: tradeFormData.value.code,
+          amount,
+          date: tradeFormData.value.date,
+          period: tradeFormData.value.period
+        })
+
+        if (result.pending) {
+          showToast('已记录买入，待基金公司确认当日净值后生效')
+        } else {
+          showToast('买入已生效')
+        }
       }
     } else {
       const shares = parseFloat(tradeFormData.value.shares)
@@ -607,6 +528,44 @@ async function submitTrade() {
   }
 }
 
+function openQuickBuyFromAddDialog() {
+  const code = formData.value.code || selectedFund.value?.code || ''
+  if (!code) {
+    showToast('请先选择基金')
+    return
+  }
+  showAddDialog.value = false
+  openTradeDialog('buy', code)
+}
+
+const filteredTradeHistoryItems = computed(() => {
+  const items = tradeHistorySummary.value.items
+  if (activeTradeHistoryTab.value === 'all') return items
+  return items.filter(item => item.type === activeTradeHistoryTab.value)
+})
+
+function formatTradeType(type: string): string {
+  const typeMap: Record<string, string> = {
+    buy: '买入',
+    sell: '卖出',
+    auto_invest: '定投',
+    switch: '转换',
+    dividend: '分红',
+    modify: '修改'
+  }
+  return typeMap[type] || '交易'
+}
+
+function formatTradeAmount(type: string, amount: number): string {
+  if (type === 'sell' || type === 'dividend') {
+    return `+${displayMoney(amount)}`
+  }
+  if (type === 'buy' || type === 'auto_invest' || type === 'switch') {
+    return `-${displayMoney(amount)}`
+  }
+  return displayMoney(amount)
+}
+
 // [WHAT] 截图导入完成回调
 function onImported(count: number) {
   // [WHAT] 导入完成后刷新持仓列表
@@ -615,7 +574,7 @@ function onImported(count: number) {
 
 // ========== 日期选择器 ==========
 const showDatePicker = ref(false)
-const datePickerMode = ref<'add' | 'trade' | 'tradeEdit'>('add')
+const datePickerMode = ref<'trade'>('trade')
 
 function toDateValues(dateStr: string): string[] {
   const normalized = dateStr || todayDate
@@ -625,43 +584,24 @@ function toDateValues(dateStr: string): string[] {
 }
 
 const datePickerValues = computed(() => {
-  if (datePickerMode.value === 'trade') return toDateValues(tradeFormData.value.date)
-  if (datePickerMode.value === 'tradeEdit') return toDateValues(editTradeFormData.value.date)
-  return toDateValues(formData.value.buyDate)
+  return toDateValues(tradeFormData.value.date)
 })
 
 const datePickerTitle = computed(() => {
-  if (datePickerMode.value === 'trade' || datePickerMode.value === 'tradeEdit') return '选择交易日期'
-  return '选择买入日期'
+  return '选择交易日期'
 })
 
 function onDateConfirm({ selectedValues }: { selectedValues: string[] }) {
   // [WHY] Vant 4 日期选择器返回 ['2024', '01', '30'] 格式
   if (selectedValues.length >= 3) {
     const date = selectedValues.join('-')
-    if (datePickerMode.value === 'trade') {
-      tradeFormData.value.date = date
-    } else if (datePickerMode.value === 'tradeEdit') {
-      editTradeFormData.value.date = date
-    } else {
-      formData.value.buyDate = date
-    }
+    tradeFormData.value.date = date
   }
   showDatePicker.value = false
 }
 
-function openBuyDatePicker() {
-  datePickerMode.value = 'add'
-  showDatePicker.value = true
-}
-
 function openTradeDatePicker() {
   datePickerMode.value = 'trade'
-  showDatePicker.value = true
-}
-
-function openTradeEditDatePicker() {
-  datePickerMode.value = 'tradeEdit'
   showDatePicker.value = true
 }
 
@@ -899,87 +839,37 @@ function displayMoney(value: number | string | undefined): string {
             </div>
           </div>
 
-          <div v-if="tradeHistorySummary.items.length > 0" class="history-list">
-            <div v-for="item in tradeHistorySummary.items" :key="item.id" class="history-item">
+          <van-tabs v-model:active="activeTradeHistoryTab" class="history-tabs" swipeable>
+            <van-tab title="全部" name="all" />
+            <van-tab title="买入" name="buy" />
+            <van-tab title="卖出" name="sell" />
+            <van-tab title="定投" name="auto_invest" />
+            <van-tab title="转换" name="switch" />
+            <van-tab title="分红" name="dividend" />
+            <van-tab title="修改" name="modify" />
+          </van-tabs>
+
+          <div v-if="filteredTradeHistoryItems.length > 0" class="history-list">
+            <div v-for="item in filteredTradeHistoryItems" :key="item.id" class="history-item">
               <div class="history-item-left">
-                <div class="history-type" :class="item.type">
-                  {{ item.type === 'buy' ? '买入' : '卖出' }}
-                </div>
+                <div class="history-type" :class="item.type">{{ formatTradeType(item.type) }}</div>
                 <div class="history-meta">{{ item.date }} · {{ formatTradePeriod(item.period) }}</div>
                 <div class="history-detail">
                   {{ item.shares.toFixed(2) }}份 @ {{ item.nav.toFixed(4) }}
                 </div>
               </div>
               <div class="history-item-right">
-                <div class="history-amount">{{ item.type === 'sell' ? '+' : '' }}{{ displayMoney(item.amount) }}</div>
+                <div class="history-amount">{{ formatTradeAmount(item.type, item.amount) }}</div>
                 <div class="history-profit" :class="getChangeStatus(item.profit)">
                   {{ showDetail ? (item.profit >= 0 ? '+' : '') + formatMoney(item.profit) : '*****' }}
                 </div>
                 <div class="history-rate" :class="getChangeStatus(item.profit)">
                   {{ formatPercent(item.profitRate) }}
                 </div>
-                <div class="history-actions">
-                  <van-button class="history-btn edit" size="mini" type="primary" plain @click="openTradeEditDialog(item)">修改</van-button>
-                  <van-button class="history-btn delete" size="mini" type="danger" plain @click="deleteTradeRecord(item.id)">删除</van-button>
-                </div>
               </div>
             </div>
           </div>
           <van-empty v-else description="暂无买卖记录" />
-        </div>
-      </div>
-    </van-popup>
-
-    <!-- 编辑交易记录弹窗 -->
-    <van-popup
-      v-model:show="showTradeEditDialog"
-      position="bottom"
-      round
-      :style="{ height: '55%' }"
-    >
-      <div class="add-dialog">
-        <div class="dialog-header">
-          <span>修改{{ editTradeFormData.type === 'buy' ? '买入' : '卖出' }}记录</span>
-          <van-icon name="cross" @click="showTradeEditDialog = false" />
-        </div>
-        <div class="dialog-content">
-          <van-field :model-value="`${historyFundName} (${historyFundCode})`" label="基金" readonly />
-          <van-field
-            v-if="editTradeFormData.type === 'buy'"
-            v-model="editTradeFormData.amount"
-            type="number"
-            label="买入金额"
-            placeholder="请输入金额（元）"
-          />
-          <van-field
-            v-else
-            v-model="editTradeFormData.shares"
-            type="number"
-            label="卖出份额"
-            placeholder="请输入份额"
-          />
-          <van-field v-model="editTradeFormData.nav" type="number" label="成交净值" placeholder="请输入成交净值" />
-          <van-field
-            v-model="editTradeFormData.date"
-            label="交易日期"
-            placeholder="请选择交易日期"
-            readonly
-            is-link
-            @click="openTradeEditDatePicker"
-          />
-          <van-field label="交易时段">
-            <template #input>
-              <van-radio-group v-model="editTradeFormData.period" direction="horizontal">
-                <van-radio name="before_15">15:00前</van-radio>
-                <van-radio name="after_15">15:00后</van-radio>
-              </van-radio-group>
-            </template>
-          </van-field>
-        </div>
-        <div class="dialog-footer">
-          <van-button block type="primary" @click="submitTradeEdit">
-            保存修改
-          </van-button>
         </div>
       </div>
     </van-popup>
@@ -1111,24 +1001,20 @@ function displayMoney(value: number | string | undefined): string {
             placeholder="请输入持仓金额（元）"
           />
 
-          <!-- 买入日期 -->
           <van-field
-            v-model="formData.buyDate"
-            label="买入日期"
-            placeholder="请选择买入日期"
-            readonly
-            is-link
-            @click="openBuyDatePicker"
+            v-model="formData.profit"
+            type="number"
+            label="持有收益"
+            placeholder="请输入持有收益（可负数）"
           />
 
-          <van-field v-if="!isEditing" label="交易时段">
-            <template #input>
-              <van-radio-group v-model="formData.buyPeriod" direction="horizontal">
-                <van-radio name="before_15">15:00前</van-radio>
-                <van-radio name="after_15">15:00后</van-radio>
-              </van-radio-group>
-            </template>
-          </van-field>
+          <div v-if="!isEditing" class="quick-buy-hint">
+            <span class="hint-text">提示：今天刚买入的基金？</span>
+            <button class="hint-buy-btn" type="button" @click="openQuickBuyFromAddDialog">
+              <van-icon name="shopping-cart-o" />
+              <span>买入</span>
+            </button>
+          </div>
 
           <!-- 计算结果展示 -->
           <div v-if="calculatedShares > 0" class="calc-result">
@@ -1137,8 +1023,8 @@ function displayMoney(value: number | string | undefined): string {
               <span class="calc-value">{{ calculatedShares.toFixed(2) }} 份</span>
             </div>
             <div class="calc-item">
-              <span class="calc-label">持仓天数</span>
-              <span class="calc-value">{{ calculatedDays }} 天</span>
+              <span class="calc-label">预估成本</span>
+              <span class="calc-value">¥{{ (parseFloat(formData.amount || '0') - (parseFloat(formData.profit || '0') || 0)).toFixed(2) }}</span>
             </div>
           </div>
         </div>
@@ -1151,7 +1037,7 @@ function displayMoney(value: number | string | undefined): string {
       </div>
     </van-popup>
 
-    <!-- 日期选择器 -->
+    <!-- 交易日期选择器 -->
     <van-popup v-model:show="showDatePicker" position="bottom">
       <van-date-picker
         :title="datePickerTitle"
@@ -1662,6 +1548,10 @@ function displayMoney(value: number | string | undefined): string {
   text-align: center;
 }
 
+.history-tabs {
+  border-bottom: 1px solid var(--border-light);
+}
+
 .history-list {
   padding: 8px 0;
 }
@@ -1689,6 +1579,22 @@ function displayMoney(value: number | string | undefined): string {
 
 .history-type.sell {
   color: var(--color-down);
+}
+
+.history-type.auto_invest {
+  color: var(--color-info);
+}
+
+.history-type.switch {
+  color: #ff9800;
+}
+
+.history-type.dividend {
+  color: #fa8c16;
+}
+
+.history-type.modify {
+  color: var(--text-secondary);
 }
 
 .history-meta,
@@ -1721,26 +1627,31 @@ function displayMoney(value: number | string | undefined): string {
   margin-top: 2px;
 }
 
-.history-actions {
+.quick-buy-hint {
   display: flex;
-  gap: 6px;
-  margin-top: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  background: #f5f9ff;
+  border: 1px solid #d8e8ff;
+  border-radius: 8px;
 }
 
-.history-actions :deep(.history-btn) {
-  background: var(--bg-tertiary);
-  border-color: var(--border-color);
+.hint-text {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
-.history-actions :deep(.history-btn.edit) {
-  color: var(--color-info);
-  border-color: var(--color-info);
-  background: var(--color-info-bg);
-}
-
-.history-actions :deep(.history-btn.delete) {
-  color: var(--color-up);
-  border-color: var(--color-up);
+.hint-buy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: #5aa5ff;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 /* 调整成本弹窗 */

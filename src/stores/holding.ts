@@ -15,7 +15,7 @@ import { fetchFundAccurateData, type FundAccurateData } from '@/api/fundFast'
 import { fetchNetValueHistoryFast } from '@/api/fundFast'
 import { calculateDailyServiceFee } from '@/api/fund'
 
-type HoldingTradeType = 'buy' | 'sell'
+type HoldingTradeType = 'buy' | 'sell' | 'auto_invest' | 'switch' | 'dividend' | 'modify'
 
 interface PendingTrade {
   id: string
@@ -313,6 +313,7 @@ export const useHoldingStore = defineStore('holding', () => {
     options?: {
       ensureInitialTradeRecord?: boolean
       initialTradePeriod?: 'before_15' | 'after_15'
+      initialTradeType?: HoldingTradeType
     }
   ) {
     const isNewHolding = holdings.value.findIndex((h) => h.code === record.code) === -1
@@ -339,7 +340,7 @@ export const useHoldingStore = defineStore('holding', () => {
         addTradeRecord({
           code: record.code,
           name: record.name,
-          type: 'buy',
+          type: options?.initialTradeType || 'buy',
           date: normalizeDate(record.buyDate) || todayStr(),
           period: options?.initialTradePeriod || 'before_15',
           nav: record.buyNetValue,
@@ -704,15 +705,18 @@ export const useHoldingStore = defineStore('holding', () => {
     let totalShares = 0
     let totalCost = 0
     let firstBuyDate = ''
+    let hasPositionTrades = false
 
     for (const record of records) {
-      if (record.type === 'buy') {
+      if (record.type === 'buy' || record.type === 'auto_invest') {
+        hasPositionTrades = true
         totalShares += record.shares
         totalCost += record.amount
         if (!firstBuyDate || record.date < firstBuyDate) {
           firstBuyDate = record.date
         }
-      } else {
+      } else if (record.type === 'sell') {
+        hasPositionTrades = true
         if (totalShares <= 0) continue
         const soldShares = Math.min(totalShares, record.shares)
         const ratio = soldShares / totalShares
@@ -720,6 +724,8 @@ export const useHoldingStore = defineStore('holding', () => {
         totalShares = Math.max(0, totalShares - soldShares)
       }
     }
+
+    if (!hasPositionTrades) return
 
     if (totalShares <= 1e-6 || totalCost <= 1e-6) {
       removeHolding(code)
@@ -778,14 +784,16 @@ export const useHoldingStore = defineStore('holding', () => {
     let nextAmount = current.amount
     let nextShares = current.shares
 
-    if (nextType === 'buy') {
+    if (nextType === 'buy' || nextType === 'auto_invest') {
       nextAmount = updates.amount !== undefined ? updates.amount : current.amount
       if (nextAmount <= 0) return false
       nextShares = nextAmount / nextNav
-    } else {
+    } else if (nextType === 'sell') {
       nextShares = updates.shares !== undefined ? updates.shares : current.shares
       if (nextShares <= 0) return false
       nextAmount = nextShares * nextNav
+    } else {
+      return false
     }
 
     tradeRecords.value[index] = {
@@ -814,7 +822,7 @@ export const useHoldingStore = defineStore('holding', () => {
     const items: HoldingTradePnLRecord[] = []
 
     for (const record of records) {
-      if (record.type === 'buy') {
+      if (record.type === 'buy' || record.type === 'auto_invest') {
         remainingShares += record.shares
         remainingCost += record.amount
         const profit = latestNav > 0 ? (latestNav - record.nav) * record.shares : 0
@@ -825,7 +833,7 @@ export const useHoldingStore = defineStore('holding', () => {
           profitRate,
           mode: 'floating'
         })
-      } else {
+      } else if (record.type === 'sell') {
         const avgCostBefore = remainingShares > 0 ? remainingCost / remainingShares : 0
         const usedShares = Math.min(record.shares, Math.max(0, remainingShares))
         const costPart = avgCostBefore * usedShares
@@ -839,6 +847,13 @@ export const useHoldingStore = defineStore('holding', () => {
           profit,
           profitRate,
           mode: 'realized'
+        })
+      } else {
+        items.push({
+          ...record,
+          profit: 0,
+          profitRate: 0,
+          mode: 'floating'
         })
       }
     }
