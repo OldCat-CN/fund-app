@@ -1081,11 +1081,11 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 .summary-value.up {
-  color: var(--color-up);
+  color: var(--color-up) !important;
 }
 
 .summary-value.down {
-  color: var(--color-down);
+  color: var(--color-down) !important;
 }
 
 .pending-tip {
@@ -1149,18 +1149,6 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 .holding-item.holding-bg-up {
-  background: var(--bg-secondary);
-}
-
-.holding-item.holding-bg-down {
-  background: var(--bg-secondary);
-}
-
-.holding-item.holding-bg-flat {
-  background: var(--bg-secondary);
-}
-
-:global([data-theme="light"]) .holding-page .holding-item.holding-bg-up {
   background: linear-gradient(
     100deg,
     rgba(246, 70, 93, 0.18) 0%,
@@ -1169,7 +1157,7 @@ function displayMoney(value: number | string | undefined): string {
   );
 }
 
-:global([data-theme="light"]) .holding-page .holding-item.holding-bg-down {
+.holding-item.holding-bg-down {
   background: linear-gradient(
     100deg,
     rgba(14, 203, 129, 0.2) 0%,
@@ -1178,7 +1166,7 @@ function displayMoney(value: number | string | undefined): string {
   );
 }
 
-:global([data-theme="light"]) .holding-page .holding-item.holding-bg-flat {
+.holding-item.holding-bg-flat {
   background: linear-gradient(
     100deg,
     rgba(139, 148, 158, 0.2) 0%,
@@ -1324,63 +1312,73 @@ function displayMoney(value: number | string | undefined): string {
 .col-today.up .profit-rate,
 .col-profit.up .profit-amount,
 .col-profit.up .profit-rate {
-  color: var(--color-up);
+  color: var(--color-up) !important;
 }
 
 .col-today.down .profit-amount,
 .col-today.down .profit-rate,
 .col-profit.down .profit-amount,
 .col-profit.down .profit-rate {
-  color: var(--color-down);
+  color: var(--color-down) !important;
 }
 
 .up { color: var(--color-up); }
 .down { color: var(--color-down); }
 .flat { color: var(--text-secondary); }
 
-:global([data-theme="dark"]) .holding-page .up {
+:global([data-theme="dark"] .holding-page .up) {
   color: var(--color-up-bright);
 }
 
-:global([data-theme="dark"]) .holding-page .down {
+:global([data-theme="dark"] .holding-page .down) {
   color: var(--color-down-bright);
 }
 
-:global([data-theme="dark"]) .holding-page .summary-value.up {
-  color: var(--color-up-bright);
+:global([data-theme="dark"] .holding-page .summary-value.up) {
+  color: var(--color-up-bright) !important;
 }
 
-:global([data-theme="dark"]) .holding-page .summary-value.down {
-  color: var(--color-down-bright);
+:global([data-theme="dark"] .holding-page .summary-value.down) {
+  color: var(--color-down-bright) !important;
 }
 
-:global([data-theme="dark"]) .holding-page .col-today.up .profit-amount,
-:global([data-theme="dark"]) .holding-page .col-today.up .profit-rate,
-:global([data-theme="dark"]) .holding-page .col-profit.up .profit-amount,
-:global([data-theme="dark"]) .holding-page .col-profit.up .profit-rate {
-  color: var(--color-up-bright);
+:global([data-theme="dark"] .holding-page .col-today.up .profit-amount),
+:global([data-theme="dark"] .holding-page .col-today.up .profit-rate),
+:global([data-theme="dark"] .holding-page .col-profit.up .profit-amount),
+:global([data-theme="dark"] .holding-page .col-profit.up .profit-rate) {
+  color: var(--color-up-bright) !important;
 }
 
-:global([data-theme="dark"]) .holding-page .col-today.down .profit-amount,
-:global([data-theme="dark"]) .holding-page .col-today.down .profit-rate,
-:global([data-theme="dark"]) .holding-page .col-profit.down .profit-amount,
-:global([data-theme="dark"]) .holding-page .col-profit.down .profit-rate {
-  color: var(--color-down-bright);
+:global([data-theme="dark"] .holding-page .col-today.down .profit-amount),
+:global([data-theme="dark"] .holding-page .col-today.down .profit-rate),
+:global([data-theme="dark"] .holding-page .col-profit.down .profit-amount),
+:global([data-theme="dark"] .holding-page .col-profit.down .profit-rate) {
+  color: var(--color-down-bright) !important;
 }
 
-:global([data-theme="dark"]) .holding-page .history-type.buy {
-  color: var(--color-up-bright);
+:global([data-theme="dark"] .holding-page .history-type.buy) {
+  color: var(--color-up-bright) !important;
 }
 
-:global([data-theme="dark"]) .holding-page .history-type.sell {
-  color: var(--color-down-bright);
+:global([data-theme="dark"] .holding-page .history-type.sell) {
+  color: var(--color-down-bright) !important;
 }
 
-:global([data-theme="dark"]) .holding-page .history-tabs :deep(.van-tab) {
+/* 深色模式与未显式设置 light 时，持仓行背景保持纯背景 */
+:global([data-theme="dark"] .holding-page .holding-item.holding-bg-up),
+:global([data-theme="dark"] .holding-page .holding-item.holding-bg-down),
+:global([data-theme="dark"] .holding-page .holding-item.holding-bg-flat),
+:global(:root:not([data-theme="light"]) .holding-page .holding-item.holding-bg-up),
+:global(:root:not([data-theme="light"]) .holding-page .holding-item.holding-bg-down),
+:global(:root:not([data-theme="light"]) .holding-page .holding-item.holding-bg-flat) {
+  background: var(--bg-secondary) !important;
+}
+
+:global([data-theme="dark"] .holding-page .history-tabs) :deep(.van-tab) {
   color: var(--text-muted);
 }
 
-:global([data-theme="dark"]) .holding-page .history-tabs :deep(.van-tab--active) {
+:global([data-theme="dark"] .holding-page .history-tabs) :deep(.van-tab--active) {
   color: var(--text-highlight);
 }
 
@@ -1731,19 +1729,19 @@ function displayMoney(value: number | string | undefined): string {
 }
 
 /* 深色模式专用：确保颜色更亮更清晰 */
-:global([data-theme="dark"]) .add-dialog :deep(.van-field__label),
-:global([data-theme="dark"]) .cost-dialog :deep(.van-field__label) {
+:global([data-theme="dark"] .holding-page .add-dialog) :deep(.van-field__label),
+:global([data-theme="dark"] .holding-page .cost-dialog) :deep(.van-field__label) {
   color: #f0f6fc !important;
 }
 
-:global([data-theme="dark"]) .add-dialog :deep(.van-field__control),
-:global([data-theme="dark"]) .cost-dialog :deep(.van-field__control) {
+:global([data-theme="dark"] .holding-page .add-dialog) :deep(.van-field__control),
+:global([data-theme="dark"] .holding-page .cost-dialog) :deep(.van-field__control) {
   color: #f0f6fc !important;
   -webkit-text-fill-color: #f0f6fc !important;
 }
 
-:global([data-theme="dark"]) .add-dialog :deep(.van-field__control::placeholder),
-:global([data-theme="dark"]) .cost-dialog :deep(.van-field__control::placeholder) {
+:global([data-theme="dark"] .holding-page .add-dialog) :deep(.van-field__control::placeholder),
+:global([data-theme="dark"] .holding-page .cost-dialog) :deep(.van-field__control::placeholder) {
   color: #8b949e !important;
   -webkit-text-fill-color: #8b949e !important;
 }
