@@ -2,19 +2,16 @@
 // [WHY] 首页 - 展示自选基金列表、市场概览和快捷入口
 // [WHAT] 支持下拉刷新、左滑删除、点击跳转搜索添加、设置提醒
 
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useFundStore } from '@/stores/fund'
 import { useAlertStore, ALERT_TYPE_CONFIG, type AlertType } from '@/stores/alert'
-import { fetchMarketIndicesFast, fetchGlobalIndices, type MarketIndexSimple, type GlobalIndex } from '@/api/fundFast'
-import { fetchFinanceNews, type NewsItem, getTradingSession, type TradingSession } from '@/api/tiantianApi'
 import { 
   fetchRemoteConfig, 
   getActiveAnnouncements, 
   markAnnouncementShown,
   checkNeedUpdate,
-  type Announcement,
-  type RemoteConfig
+  type Announcement
 } from '@/api/remote'
 import { APP_VERSION } from '@/config/version'
 import { Snackbar, Dialog } from '@varlet/ui'
@@ -27,36 +24,6 @@ const alertStore = useAlertStore()
 // [WHY] 会话级标记，确保远程配置只在首次启动时加载
 // [WHAT] 使用模块级变量而非响应式，避免后台切换重复触发
 let hasLoadedRemoteConfig = false
-
-// [WHAT] 大盘指数
-const indices = ref<MarketIndexSimple[]>([])
-
-// [WHAT] 交易状态
-const tradingSession = ref<TradingSession>('closed')
-
-// [WHAT] 交易状态文本和样式
-const tradingStatus = computed(() => {
-  const session = tradingSession.value
-  const now = new Date()
-  const hour = now.getHours()
-  const minute = now.getMinutes()
-  const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-  
-  switch (session) {
-    case 'morning':
-      return { text: '交易中', subText: `上午盘 ${timeStr}`, class: 'trading', icon: 'live' }
-    case 'noon_break':
-      return { text: '午休中', subText: `13:00 开盘`, class: 'break', icon: 'pause' }
-    case 'afternoon':
-      return { text: '交易中', subText: `下午盘 ${timeStr}`, class: 'trading', icon: 'live' }
-    default:
-      return { text: '已收盘', subText: '09:30 开盘', class: 'closed', icon: 'clock' }
-  }
-})
-
-// [WHAT] 全球指数
-const globalIndices = ref<GlobalIndex[]>([])
-const showGlobalIndices = ref(false)
 
 // [WHAT] 公告列表（默认 + 远程）
 const defaultNotices = [
@@ -78,33 +45,14 @@ const updateInfo = ref<{
   updateUrl: string
 } | null>(null)
 
-// [WHAT] 财经资讯
-const newsList = ref<NewsItem[]>([])
-const newsLoading = ref(false)
-const showNewsDetail = ref(false)
-const currentNews = ref<NewsItem | null>(null)
-
 // [WHAT] 页面挂载时初始化数据
 onMounted(async () => {
   fundStore.initWatchlist()
   // 请求通知权限
   await alertStore.requestNotificationPermission()
-  // 加载大盘指数、全球指数和资讯
-  loadIndices()
-  loadGlobalIndices()
-  loadNews()
   // 加载远程配置
   loadRemoteConfig()
-  // 初始化交易状态
-  updateTradingSession()
-  // 每分钟更新交易状态
-  setInterval(updateTradingSession, 60000)
 })
-
-// [WHAT] 更新交易状态
-function updateTradingSession() {
-  tradingSession.value = getTradingSession()
-}
 
 // [WHAT] 加载远程配置（公告和更新检查）
 // [WHY] 只在首次启动时加载，后台切换回来不重复加载
@@ -176,36 +124,6 @@ function goToUpdate() {
   }
 }
 
-// [WHAT] 加载大盘指数
-async function loadIndices() {
-  try {
-    indices.value = await fetchMarketIndicesFast()
-  } catch {
-    // 静默失败
-  }
-}
-
-// [WHAT] 加载全球指数
-async function loadGlobalIndices() {
-  try {
-    globalIndices.value = await fetchGlobalIndices()
-  } catch {
-    // 静默失败
-  }
-}
-
-// [WHAT] 加载财经资讯
-async function loadNews() {
-  newsLoading.value = true
-  try {
-    newsList.value = await fetchFinanceNews(6)
-  } catch {
-    // 静默失败
-  } finally {
-    newsLoading.value = false
-  }
-}
-
 // [WHAT] 监听数据变化，检查提醒条件
 watch(
   () => fundStore.watchlist,
@@ -225,12 +143,7 @@ watch(
 
 // [WHAT] 下拉刷新处理
 async function onRefresh() {
-  await Promise.all([
-    fundStore.refreshEstimates(),
-    loadIndices(),
-    loadGlobalIndices(),
-    loadNews()
-  ])
+  await fundStore.refreshEstimates()
   Snackbar.success('刷新成功')
 }
 
@@ -249,21 +162,6 @@ async function handleDelete(code: string) {
 // [WHAT] 跳转到搜索页
 function goToSearch() {
   router.push('/search')
-}
-
-// [WHAT] 打开资讯详情
-function openNews(news: NewsItem) {
-  currentNews.value = news
-  showNewsDetail.value = true
-}
-
-// [WHAT] 跳转到外部链接
-function openNewsUrl() {
-  if (currentNews.value?.url) {
-    window.open(currentNews.value.url, '_blank')
-  } else {
-    Snackbar.warning('暂无详情链接')
-  }
 }
 
 // [WHAT] 跳转到基金详情页
@@ -323,10 +221,6 @@ function submitAlert() {
       <div class="search-bar" @click="goToSearch">
         <van-icon name="search" size="16" />
         <span>搜索基金代码/名称</span>
-      </div>
-      <div class="header-right">
-        <van-icon name="bullhorn-o" size="22" @click="router.push('/announcement')" />
-        <van-icon name="setting-o" size="22" @click="router.push('/alerts')" />
       </div>
     </div>
     
@@ -394,78 +288,6 @@ function submitAlert() {
       @refresh="onRefresh"
       class="fund-list-container"
     >
-      <!-- 大盘指数概览 - 交易终端风格 -->
-      <div class="market-overview" v-if="indices.length > 0">
-        <div class="overview-title">
-          <div class="title-left">
-            <span class="live-dot" :class="tradingStatus.class"></span>
-            <span>大盘指数</span>
-          </div>
-          <div class="trading-status" :class="tradingStatus.class">
-            <span class="status-text">{{ tradingStatus.text }}</span>
-            <span class="status-time">{{ tradingStatus.subText }}</span>
-          </div>
-        </div>
-        <div class="index-grid">
-          <div 
-            v-for="index in indices" 
-            :key="index.code" 
-            class="index-item"
-            :class="[index.change >= 0 ? 'up' : 'down']"
-            @click="router.push('/market')"
-          >
-            <div class="index-name">{{ index.name }}</div>
-            <div class="index-value">
-              <span class="value-num">{{ index.current.toFixed(2) }}</span>
-            </div>
-            <div class="index-change">
-              <van-icon :name="index.change >= 0 ? 'arrow-up' : 'arrow-down'" size="10" />
-              <span>{{ Math.abs(index.change).toFixed(2) }}%</span>
-            </div>
-            <div class="index-bar"></div>
-          </div>
-        </div>
-      </div>
-      
-      <!-- 全球指数 -->
-      <div class="global-indices" v-if="globalIndices.length > 0">
-        <div class="section-header" @click="showGlobalIndices = !showGlobalIndices">
-          <span>全球指数</span>
-          <van-icon :name="showGlobalIndices ? 'arrow-up' : 'arrow-down'" size="14" />
-        </div>
-        <!-- [FIX] #35 优化全球指数排版 -->
-        <div class="global-grid" v-show="showGlobalIndices">
-          <div 
-            v-for="idx in globalIndices" 
-            :key="idx.code" 
-            class="global-item"
-            :class="idx.price > 0 ? (idx.changePercent >= 0 ? 'up' : 'down') : 'no-data'"
-          >
-            <div class="global-name">
-              <span class="region-tag" :class="idx.region">{{ 
-                idx.region === 'cn' ? '中' : 
-                idx.region === 'hk' ? '港' : 
-                idx.region === 'us' ? '美' : 
-                idx.region === 'eu' ? '欧' : '亚' 
-              }}</span>
-              {{ idx.name }}
-            </div>
-            <div class="global-values" v-if="idx.price > 0">
-              <div class="global-price">{{ idx.price > 1000 ? idx.price.toFixed(0) : idx.price.toFixed(2) }}</div>
-              <div class="global-change">
-                {{ idx.changePercent >= 0 ? '+' : '' }}{{ idx.changePercent.toFixed(2) }}%
-              </div>
-            </div>
-            <div class="global-values no-data-text" v-else>
-              <span>暂无数据</span>
-            </div>
-          </div>
-        </div>
-        <div class="expand-hint" v-show="!showGlobalIndices" @click="showGlobalIndices = true">
-          点击展开查看全球指数行情
-        </div>
-      </div>
-      
       <!-- 快捷入口 -->
       <div class="quick-actions">
         <div class="action-item" @click="router.push('/search')">
@@ -516,31 +338,6 @@ function submitAlert() {
           </div>
           <span>提醒</span>
         </div>
-      </div>
-      
-      <!-- 财经资讯 -->
-      <div class="news-section">
-        <div class="section-header">
-          <span class="section-title">财经资讯</span>
-          <span class="view-more">更多 ></span>
-        </div>
-        <div class="news-list" v-if="!newsLoading && newsList.length > 0">
-          <div 
-            v-for="news in newsList" 
-            :key="news.id" 
-            class="news-item"
-            @click="openNews(news)"
-          >
-            <div class="news-content">
-              <div class="news-title">{{ news.title }}</div>
-              <div class="news-meta">
-                <span class="news-source">{{ news.source }}</span>
-                <span class="news-time">{{ news.time }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <van-loading v-else-if="newsLoading" class="news-loading" />
       </div>
       
       <!-- 自选基金标题 -->
@@ -617,41 +414,6 @@ function submitAlert() {
       </div>
     </van-popup>
     
-    <!-- 资讯详情弹窗 -->
-    <van-popup 
-      v-model:show="showNewsDetail" 
-      position="bottom" 
-      round
-      :style="{ height: '70%' }"
-    >
-      <div class="news-detail" v-if="currentNews">
-        <div class="news-detail-header">
-          <span>资讯详情</span>
-          <van-icon name="cross" @click="showNewsDetail = false" />
-        </div>
-        <div class="news-detail-content">
-          <h3 class="news-detail-title">{{ currentNews.title }}</h3>
-          <div class="news-detail-meta">
-            <span>{{ currentNews.source }}</span>
-            <span>{{ currentNews.time }}</span>
-          </div>
-          <div class="news-detail-summary">
-            {{ currentNews.summary || '暂无摘要内容' }}
-          </div>
-        </div>
-        <div class="news-detail-footer" v-if="currentNews.url">
-          <van-button block type="primary" @click="openNewsUrl">
-            查看原文
-          </van-button>
-        </div>
-        <div class="news-detail-footer" v-else>
-          <van-button block plain @click="showNewsDetail = false">
-            知道了
-          </van-button>
-        </div>
-      </div>
-    </van-popup>
-    
     <!-- 公告详情弹窗 -->
     <van-popup
       v-model:show="showAnnouncementPopup"
@@ -713,10 +475,10 @@ function submitAlert() {
 .top-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 12px 16px;
   padding-top: calc(12px + env(safe-area-inset-top, 0px));
-  background: linear-gradient(180deg, var(--bg-secondary) 0%, rgba(22, 27, 34, 0.95) 100%);
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   position: sticky;
@@ -744,45 +506,19 @@ function submitAlert() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  color: var(--text-muted);
+  padding: 11px 14px;
+  background: linear-gradient(135deg, rgba(25, 137, 250, 0.12) 0%, rgba(25, 137, 250, 0.04) 100%);
+  border: 1px solid rgba(25, 137, 250, 0.24);
+  border-radius: 12px;
+  color: var(--text-secondary);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .search-bar:active {
-  background: var(--bg-active);
-  border-color: var(--color-primary);
-}
-
-/* [FIX] #52 右上角功能入口样式优化 */
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.header-right .van-icon {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-primary-light, rgba(25, 137, 250, 0.1));
-  border-radius: var(--radius-sm);
-  color: var(--color-primary, #1989fa);
-  transition: all 0.2s;
-}
-
-.header-right .van-icon:active {
-  background: var(--color-primary, #1989fa);
-  color: #fff;
-  transform: scale(0.95);
+  background: linear-gradient(135deg, rgba(25, 137, 250, 0.18) 0%, rgba(25, 137, 250, 0.08) 100%);
+  border-color: rgba(25, 137, 250, 0.38);
 }
 
 /* 公告栏 */

@@ -7,9 +7,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { Snackbar } from '@varlet/ui'
 import TabBarIcon from '@/components/TabBarIcon.vue'
 
-// [WHAT] 水印文字
-const watermarkText = '开源软件基金宝'
-
 // [FIX] #50 记住用户上次访问的主页面
 const LAST_TAB_KEY = 'fund_app_last_tab'
 
@@ -131,13 +128,6 @@ function onTabChange(index: number) {
 
 <template>
   <div class="app-container">
-    <!-- 全局水印 -->
-    <div class="watermark">
-      <div class="watermark-content">
-        <span v-for="i in 50" :key="i" class="watermark-text">{{ watermarkText }}</span>
-      </div>
-    </div>
-
     <!-- 路由视图 -->
     <!-- [WHY] 暂时禁用 keep-alive 避免页面缓存混乱 -->
     <!-- [WHY] 包装容器确保页面撑满剩余空间，正确处理 Android 滚动 -->
@@ -214,39 +204,4 @@ function onTabChange(index: number) {
   color: inherit;
 }
 
-/* [WHY] 全局水印样式 */
-/* [WHAT] 覆盖整个页面，半透明，不可点击 */
-.watermark {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 9999;
-  pointer-events: none; /* [WHY] 不阻挡用户点击 */
-  overflow: hidden;
-}
-
-.watermark-content {
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  transform: rotate(-30deg); /* [WHY] 斜向排列更美观 */
-}
-
-.watermark-text {
-  display: inline-block;
-  padding: 30px 50px;
-  font-size: 16px;
-  font-weight: 500;
-  color: rgba(128, 128, 128, 0.15); /* [WHY] 半透明灰色，不影响阅读 */
-  white-space: nowrap;
-  user-select: none;
-}
 </style>

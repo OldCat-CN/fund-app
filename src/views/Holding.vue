@@ -679,7 +679,6 @@ function displayMoney(value: number | string | undefined): string {
     <!-- 持仓列表表头 -->
     <div v-if="holdingStore.holdings.length > 0" class="list-header">
       <span class="col-name">基金名称</span>
-      <span class="col-change">当日涨幅</span>
       <span class="col-today">当日收益</span>
       <span class="col-profit">持有收益</span>
     </div>
@@ -709,11 +708,13 @@ function displayMoney(value: number | string | undefined): string {
               <van-button class="trade-btn history" size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
             </div>
           </div>
-          <div class="col-change" :class="getChangeStatus(holding.todayChange || 0)">
-            {{ formatPercent(holding.todayChange || 0) }}
-          </div>
           <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
-            {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
+            <div class="profit-amount">
+              {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
+            </div>
+            <div class="profit-rate">
+              {{ formatPercent(holding.todayChange || 0) }}
+            </div>
           </div>
           <div class="col-profit" :class="getChangeStatus(holding.profit || 0)">
             <div class="profit-amount">
@@ -1155,7 +1156,7 @@ function displayMoney(value: number | string | undefined): string {
 
 /* 汇总卡片 - 交易终端风格 */
 .summary-card {
-  background: linear-gradient(135deg, #1a1f2e 0%, var(--bg-secondary) 50%, #1a2420 100%);
+  background: linear-gradient(145deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
   margin: 12px;
   padding: 20px;
   border-radius: var(--radius-lg);
@@ -1169,11 +1170,11 @@ function displayMoney(value: number | string | undefined): string {
   position: absolute;
   top: 0;
   right: 0;
-  width: 200px;
-  height: 200px;
-  background: radial-gradient(circle, var(--color-primary) 0%, transparent 70%);
-  opacity: 0.06;
-  transform: translate(30%, -30%);
+  width: 180px;
+  height: 180px;
+  background: radial-gradient(circle, rgba(25, 137, 250, 0.12) 0%, transparent 70%);
+  opacity: 0.5;
+  transform: translate(35%, -35%);
 }
 
 .summary-card::after {
@@ -1181,10 +1182,10 @@ function displayMoney(value: number | string | undefined): string {
   position: absolute;
   bottom: 0;
   left: 0;
-  width: 150px;
-  height: 150px;
-  background: radial-gradient(circle, var(--color-down) 0%, transparent 70%);
-  opacity: 0.04;
+  width: 140px;
+  height: 140px;
+  background: radial-gradient(circle, rgba(0, 168, 112, 0.12) 0%, transparent 70%);
+  opacity: 0.45;
   transform: translate(-30%, 30%);
 }
 
@@ -1250,7 +1251,7 @@ function displayMoney(value: number | string | undefined): string {
 /* 列表表头 */
 .list-header {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
   padding: 12px 16px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -1277,7 +1278,7 @@ function displayMoney(value: number | string | undefined): string {
 
 .holding-item {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
   align-items: center;
   padding: 14px 16px;
   background: var(--bg-secondary);
@@ -1309,6 +1310,12 @@ function displayMoney(value: number | string | undefined): string {
   font-size: 14px;
   color: var(--text-primary);
   margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .col-name .fund-code {
@@ -1390,15 +1397,17 @@ function displayMoney(value: number | string | undefined): string {
   background: var(--bg-secondary);
 }
 
-.col-change, .col-today, .col-profit {
+.col-today, .col-profit {
   text-align: center;
   font-size: 14px;
 }
 
+.col-today .profit-amount,
 .col-profit .profit-amount {
   font-size: 14px;
 }
 
+.col-today .profit-rate,
 .col-profit .profit-rate {
   font-size: 12px;
   opacity: 0.8;
