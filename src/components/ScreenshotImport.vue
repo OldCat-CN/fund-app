@@ -831,22 +831,24 @@ function formatAmount(amount: number): string {
 
 .preview-image {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   border-radius: 12px;
   background: var(--bg-primary);
   padding: 8px;
 }
 
 .preview-image-inner {
-  min-height: 100%;
+  height: 100%;
   width: 100%;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
 }
 
 .preview-image img {
-  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
   object-fit: contain;
   border-radius: 8px;
