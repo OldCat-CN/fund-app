@@ -819,6 +819,18 @@ function getPendingOnlyDayChangeText(code: string): string {
   return formatPercent(value)
 }
 
+function getPendingOnlyDayChangeValue(code: string): number {
+  const value = pendingOnlyDayChangeMap.value[code]
+  if (typeof value !== 'number' || Number.isNaN(value)) return 0
+  return value
+}
+
+function getPendingOnlyBgClass(code: string): string {
+  const value = getPendingOnlyDayChangeValue(code)
+  if (value === 0) return 'holding-bg-flat'
+  return value > 0 ? 'holding-bg-up' : 'holding-bg-down'
+}
+
 function handleSellClick(code: string, name = '') {
   const holding = holdingStore.getHoldingByCode(code)
   if (!holding) {
@@ -953,7 +965,8 @@ function handleSellClick(code: string, name = '') {
         <div
           v-for="pendingItem in pendingOnlyItems"
           :key="`pending_only_${pendingItem.code}`"
-          class="holding-item holding-bg-flat pending-only-item"
+          class="holding-item pending-only-item"
+          :class="getPendingOnlyBgClass(pendingItem.code)"
         >
           <div class="col-name">
             <div class="fund-name">{{ pendingItem.name }}</div>
@@ -975,7 +988,7 @@ function handleSellClick(code: string, name = '') {
               <van-button class="trade-btn history" size="mini" type="primary" plain @click="openPendingTradesDialog(pendingItem.code, pendingItem.name)">交易记录</van-button>
             </div>
           </div>
-          <div class="col-today flat">
+          <div class="col-today" :class="getChangeStatus(getPendingOnlyDayChangeValue(pendingItem.code))">
             <div class="profit-amount">-</div>
             <div class="profit-rate">{{ getPendingOnlyDayChangeText(pendingItem.code) }}</div>
           </div>
