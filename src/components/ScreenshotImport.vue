@@ -587,7 +587,9 @@ function formatAmount(amount: number): string {
       <!-- 识别中 -->
       <div v-if="step === 'recognizing'" class="recognizing-step">
         <div class="preview-image">
-          <img :src="selectedImage" alt="截图预览" />
+          <div class="preview-image-inner">
+            <img :src="selectedImage" alt="截图预览" />
+          </div>
         </div>
         <div class="progress-section">
           <van-progress :percentage="ocrProgress" stroke-width="8" />
@@ -829,18 +831,25 @@ function formatAmount(amount: number): string {
 
 .preview-image {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  overflow: auto;
   border-radius: 12px;
   background: var(--bg-primary);
+  padding: 8px;
+}
+
+.preview-image-inner {
+  min-height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .preview-image img {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: auto;
   object-fit: contain;
+  border-radius: 8px;
 }
 
 .progress-section {
