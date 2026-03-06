@@ -628,21 +628,21 @@ function handleWrapperShowUpdate(value: boolean) {
 
       <!-- 识别中 -->
       <div v-if="step === 'recognizing'" class="recognizing-step">
+        <div class="progress-section">
+          <van-progress :percentage="ocrProgress" stroke-width="8" />
+          <p class="progress-text">{{ ocrStatus }}</p>
+        </div>
         <div class="preview-image">
           <div class="preview-image-inner">
             <img :src="selectedImage" alt="截图预览" />
           </div>
-        </div>
-        <div class="progress-section">
-          <van-progress :percentage="ocrProgress" stroke-width="8" />
-          <p class="progress-text">{{ ocrStatus }}</p>
         </div>
       </div>
 
       <!-- 预览确认 -->
       <div v-if="step === 'preview'" class="preview-step">
         <div class="preview-header">
-          <span>识别到 {{ enhancedHoldings.length }} 条记录（收益列：{{ profitLabelText }}）</span>
+          <span>识别到 {{ enhancedHoldings.length }} 条记录</span>
           <van-button class="action-btn ghost-btn" size="small" plain @click="toggleSelectAll">
             {{ selectedCount === allSelectableCount ? '取消全选' : '全选' }}
           </van-button>
