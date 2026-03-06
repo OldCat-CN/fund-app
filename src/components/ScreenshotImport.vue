@@ -4,9 +4,9 @@
 // [WHAT] 支持通过名称搜索匹配基金代码，支持已持有基金的加仓
 // [DEPS] 依赖 ocr.ts 进行文字识别
 
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { showToast, showLoadingToast, closeToast } from 'vant'
-import { recognizeHoldingSnapshot, type RecognizedHolding, type ProfitLabelType } from '@/utils/ocr'
+import { recognizeHoldingSnapshot, preloadOcrEngine, type RecognizedHolding, type ProfitLabelType } from '@/utils/ocr'
 import { searchFund } from '@/api/fund'
 import { fetchFundAccurateData, fetchNetValueHistoryFast } from '@/api/fundFast'
 import { useHoldingStore } from '@/stores/holding'
@@ -50,8 +50,13 @@ interface EnhancedHolding extends RecognizedHolding {
   searching?: boolean
   /** 是否显示搜索面板 */
   showSearch?: boolean
+  /** 手动搜索关键字 */
+  searchKeyword?: string
 }
 const enhancedHoldings = ref<EnhancedHolding[]>([])
+const preloadingEngine = ref(false)
+const ocrEngineReady = ref(false)
+const searchTimers = new Map<number, ReturnType<typeof setTimeout>>()
 const profitLabelText = computed(() => {
   if (snapshotProfitLabel.value === 'today') return '今日收益'
   if (snapshotProfitLabel.value === 'yesterday') return '昨日收益'
@@ -67,6 +72,24 @@ const selectedCount = computed(() => {
 const addPositionCount = computed(() => {
   return enhancedHoldings.value.filter(h => h.selected && h.code && h.isAddPosition).length
 })
+const allSelectableCount = computed(() => enhancedHoldings.value.filter(h => h.code && h.amount > 0).length)
+
+watch(
+  () => props.show,
+  () => {
+    if (preloadingEngine.value || ocrEngineReady.value) return
+    preloadingEngine.value = true
+    preloadOcrEngine()
+      .then(() => {
+        ocrEngineReady.value = true
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        preloadingEngine.value = false
+      })
+  },
+  { immediate: true }
+)
 
 // [WHAT] 文件选择处理
 async function handleFileChange(event: Event) {
@@ -96,6 +119,10 @@ async function startRecognition(file: File) {
   ocrStatus.value = '准备识别...'
   
   try {
+    if (preloadingEngine.value) {
+      ocrStatus.value = '识别引擎预加载中...'
+    }
+
     const snapshot = await recognizeHoldingSnapshot(file, (progress, status) => {
       ocrProgress.value = Math.round(progress * 100)
       ocrStatus.value = status
@@ -175,19 +202,23 @@ async function searchAndMatchByName(index: number, name: string) {
     enhancedHoldings.value[index].searching = true
     
     // [WHAT] 搜索基金
-    const results = await searchFund(name, 10)
+    const keyword = name.trim()
+    const results = await searchFund(keyword, 10)
     enhancedHoldings.value[index].searchResults = results
+    enhancedHoldings.value[index].searchKeyword = keyword
     
     // [WHAT] 尝试自动匹配（名称高度相似）
     if (results.length > 0) {
+      const codeInName = keyword.match(/\d{6}/)?.[0]
+      const codeMatch = codeInName ? results.find(r => r.code === codeInName) : undefined
       // 优先精确匹配
-      const exactMatch = results.find(r => r.name === name)
+      const exactMatch = results.find(r => r.name === keyword)
       // 其次检查名称包含关系
       const containsMatch = results.find(r => 
-        r.name.includes(name) || name.includes(r.name.replace(/[A-Z]$/i, ''))
+        r.name.includes(keyword) || keyword.includes(r.name.replace(/[A-Z]$/i, ''))
       )
       
-      const bestMatch = exactMatch || containsMatch
+      const bestMatch = codeMatch || exactMatch || containsMatch
       
       if (bestMatch) {
         // [WHAT] 自动选中最佳匹配
@@ -217,6 +248,7 @@ async function selectSearchResult(index: number, fund: FundInfo) {
   holding.fundInfo = fund
   holding.name = fund.name
   holding.showSearch = false
+  holding.searchKeyword = ''
   holding.needsCodeMatch = false
   holding.selected = true
   
@@ -247,7 +279,18 @@ async function resolveImportNav(code: string): Promise<{ nav: number; navDate: s
   const today = getTodayDate()
   try {
     const accurate = await fetchFundAccurateData(code)
-    if (snapshotProfitLabel.value === 'yesterday') {
+    const now = new Date()
+    const isBeforeClose = now.getHours() < 15
+    const useYesterdayByTime = isBeforeClose
+    const useYesterdayByLabel = snapshotProfitLabel.value === 'yesterday'
+    const useTodayByLabel = snapshotProfitLabel.value === 'today'
+    const hasTodayNav = accurate.nav > 0 && accurate.navDate === today
+
+    const shouldUseYesterday =
+      useYesterdayByLabel ||
+      (!useTodayByLabel && (useYesterdayByTime || !hasTodayNav))
+
+    if (shouldUseYesterday) {
       const history = await fetchNetValueHistoryFast(code, 120)
       const yesterdayNav = history.find(item => item.netValue > 0 && item.date < today)
       if (yesterdayNav) {
@@ -259,6 +302,9 @@ async function resolveImportNav(code: string): Promise<{ nav: number; navDate: s
       return null
     }
 
+    if (hasTodayNav) {
+      return { nav: accurate.nav, navDate: accurate.navDate }
+    }
     if (accurate.currentValue > 0) {
       const navDate = accurate.dataSource === 'nav' && accurate.navDate ? accurate.navDate : today
       return { nav: accurate.currentValue, navDate }
@@ -287,21 +333,33 @@ async function fillImportData(index: number) {
 
 // [NEW] 手动搜索基金
 async function manualSearch(index: number, keyword: string) {
-  if (!keyword.trim()) return
+  const trimmed = keyword.trim()
   
   const holding = enhancedHoldings.value[index]
-  holding.searching = true
-  
-  try {
-    const results = await searchFund(keyword, 10)
-    holding.searchResults = results
-    holding.showSearch = true
-  } catch (error) {
-    console.error('搜索失败:', error)
-    showToast('搜索失败')
-  } finally {
-    holding.searching = false
+  holding.searchKeyword = keyword
+  if (searchTimers.has(index)) {
+    clearTimeout(searchTimers.get(index)!)
+    searchTimers.delete(index)
   }
+  if (!trimmed) {
+    holding.searchResults = []
+    holding.searching = false
+    return
+  }
+  holding.searching = true
+  searchTimers.set(index, setTimeout(async () => {
+    try {
+      const results = await searchFund(trimmed, 10)
+      holding.searchResults = results
+      holding.showSearch = true
+    } catch (error) {
+      console.error('搜索失败:', error)
+      showToast('搜索失败')
+    } finally {
+      holding.searching = false
+      searchTimers.delete(index)
+    }
+  }, 250))
 }
 
 // [NEW] 切换搜索面板显示
@@ -311,8 +369,9 @@ function toggleSearchPanel(index: number) {
   
   // 如果打开面板且没有搜索结果，自动搜索
   if (holding.showSearch && (!holding.searchResults || holding.searchResults.length === 0)) {
-    if (holding.name) {
-      manualSearch(index, holding.name)
+    const initKeyword = holding.searchKeyword || holding.code || holding.name
+    if (initKeyword) {
+      manualSearch(index, initKeyword)
     }
   }
 }
@@ -346,6 +405,7 @@ function updateAmount(index: number, value: string) {
   const amount = parseFloat(value)
   if (!isNaN(amount) && amount >= 0) {
     enhancedHoldings.value[index].amount = amount
+    fillImportData(index)
   }
 }
 
@@ -458,6 +518,8 @@ function closeDialog() {
     snapshotProfitLabel.value = 'unknown'
     recognizedHoldings.value = []
     enhancedHoldings.value = []
+    searchTimers.forEach((timer) => clearTimeout(timer))
+    searchTimers.clear()
   }, 300)
 }
 
@@ -483,9 +545,9 @@ function formatAmount(amount: number): string {
 <template>
   <van-popup
     :show="props.show"
-    position="bottom"
+    position="center"
     round
-    :style="{ height: '85%' }"
+    :style="{ width: '92%', maxWidth: '560px', maxHeight: '86vh' }"
     @update:show="emit('update:show', $event)"
   >
     <div class="import-dialog">
@@ -537,8 +599,8 @@ function formatAmount(amount: number): string {
       <div v-if="step === 'preview'" class="preview-step">
         <div class="preview-header">
           <span>识别到 {{ enhancedHoldings.length }} 条记录（收益列：{{ profitLabelText }}）</span>
-          <van-button size="small" plain @click="toggleSelectAll">
-            {{ selectedCount === enhancedHoldings.filter(h => h.code && h.amount > 0).length ? '取消全选' : '全选' }}
+          <van-button class="action-btn ghost-btn" size="small" plain @click="toggleSelectAll">
+            {{ selectedCount === allSelectableCount ? '取消全选' : '全选' }}
           </van-button>
         </div>
         
@@ -574,11 +636,12 @@ function formatAmount(amount: number): string {
                 <div class="item-info">
                   <!-- [NEW] 加仓标签 -->
                   <span v-if="holding.isAddPosition" class="tag-add-position">加仓</span>
-                  <!-- [NEW] 需要匹配代码 -->
-                  <span v-else-if="!holding.code && holding.needsCodeMatch" class="tag-needs-match" @click.stop="toggleSearchPanel(index)">
-                    点击匹配
-                  </span>
-                  <span v-else class="confidence" :style="{ color: getConfidenceColor(holding.confidence) }">
+                  <span v-if="holding.code" class="tag-match-success">匹配成功</span>
+                  <span v-else class="tag-needs-match">匹配失败</span>
+                  <button class="edit-match-btn" type="button" @click.stop="toggleSearchPanel(index)">
+                    <van-icon name="edit" />
+                  </button>
+                  <span class="confidence" :style="{ color: getConfidenceColor(holding.confidence) }">
                     置信度 {{ Math.round(holding.confidence * 100) }}%
                   </span>
                 </div>
@@ -606,7 +669,7 @@ function formatAmount(amount: number): string {
                 <input 
                   type="text"
                   class="search-input"
-                  :value="holding.name"
+                  :value="holding.searchKeyword ?? holding.name"
                   placeholder="输入基金名称或代码搜索"
                   @input="manualSearch(index, ($event.target as HTMLInputElement).value)"
                 />
@@ -636,8 +699,8 @@ function formatAmount(amount: number): string {
         </div>
         
         <div class="preview-footer">
-          <van-button plain @click="reselectImage">重新选择</van-button>
-          <van-button type="primary" :disabled="selectedCount === 0" @click="confirmImport">
+          <van-button class="action-btn ghost-btn" plain @click="reselectImage">重新选择</van-button>
+          <van-button class="action-btn primary-btn" type="primary" :disabled="selectedCount === 0" @click="confirmImport">
             {{ addPositionCount > 0 ? `导入 ${selectedCount - addPositionCount} / 加仓 ${addPositionCount}` : `导入 ${selectedCount} 只基金` }}
           </van-button>
         </div>
@@ -654,10 +717,12 @@ function formatAmount(amount: number): string {
 
 <style scoped>
 .import-dialog {
-  height: 100%;
+  height: min(86vh, 760px);
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
+  border-radius: 16px;
+  overflow: hidden;
 }
 
 .dialog-header {
@@ -921,8 +986,25 @@ function formatAmount(amount: number): string {
   cursor: pointer;
 }
 
-.tag-needs-match:active {
-  background: rgba(250, 173, 20, 0.2);
+.tag-match-success {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: rgba(82, 196, 26, 0.1);
+  color: var(--color-success, #52c41a);
+  border-radius: 4px;
+}
+
+.edit-match-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  padding: 0;
+  margin-left: 4px;
+  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 /* [NEW] 搜索面板样式 */
@@ -1046,6 +1128,25 @@ function formatAmount(amount: number): string {
 
 .preview-footer .van-button {
   flex: 1;
+}
+
+.action-btn {
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+:global([data-theme="dark"] .import-dialog .ghost-btn.van-button),
+:global(:root:not([data-theme="light"]) .import-dialog .ghost-btn.van-button) {
+  background: #161B22 !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+:global([data-theme="dark"] .import-dialog .primary-btn.van-button),
+:global(:root:not([data-theme="light"]) .import-dialog .primary-btn.van-button) {
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+  color: #fff !important;
 }
 
 /* 导入中 */

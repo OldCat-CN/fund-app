@@ -3,6 +3,7 @@
 // [DEPS] 依赖 tesseract.js 库
 
 import Tesseract from 'tesseract.js'
+import type { Worker, LoggerMessage } from 'tesseract.js'
 
 /**
  * 识别结果中的持仓项
@@ -45,6 +46,47 @@ export interface RecognizedHoldingSnapshot {
  */
 export type OcrProgressCallback = (progress: number, status: string) => void
 
+let sharedWorkerPromise: Promise<Worker> | null = null
+let activeProgressCallback: OcrProgressCallback | undefined
+
+function mapOcrStatus(status: string): string {
+  const statusMap: Record<string, string> = {
+    'loading tesseract core': '加载识别引擎...',
+    'initializing tesseract': '初始化引擎...',
+    'loading language traineddata': '加载语言包...',
+    'initializing api': '准备识别...',
+    'recognizing text': '识别文字中...'
+  }
+  return statusMap[status] || status
+}
+
+function emitProgress(message: LoggerMessage) {
+  if (!activeProgressCallback || !message.status) return
+  activeProgressCallback(message.progress || 0, mapOcrStatus(message.status))
+}
+
+async function getSharedWorker(): Promise<Worker> {
+  if (!sharedWorkerPromise) {
+    sharedWorkerPromise = Tesseract.createWorker('chi_sim+eng', undefined, {
+      logger: emitProgress
+    })
+  }
+  return sharedWorkerPromise
+}
+
+/**
+ * 预加载 OCR 引擎，减少首次识别耗时
+ */
+export async function preloadOcrEngine(onProgress?: OcrProgressCallback): Promise<void> {
+  activeProgressCallback = onProgress
+  try {
+    await getSharedWorker()
+    if (onProgress) onProgress(1, '识别引擎已就绪')
+  } finally {
+    activeProgressCallback = undefined
+  }
+}
+
 /**
  * 从图片中识别文字
  * [WHY] 使用 Tesseract.js 进行本地 OCR，支持中英文混合识别
@@ -56,27 +98,14 @@ export async function recognizeText(
   imageSource: File | string,
   onProgress?: OcrProgressCallback
 ): Promise<string> {
-  const worker = await Tesseract.createWorker('chi_sim+eng', undefined, {
-    logger: (m) => {
-      if (onProgress && m.status) {
-        const progress = m.progress || 0
-        const statusMap: Record<string, string> = {
-          'loading tesseract core': '加载识别引擎...',
-          'initializing tesseract': '初始化引擎...',
-          'loading language traineddata': '加载语言包...',
-          'initializing api': '准备识别...',
-          'recognizing text': '识别文字中...'
-        }
-        onProgress(progress, statusMap[m.status] || m.status)
-      }
-    }
-  })
+  const worker = await getSharedWorker()
+  activeProgressCallback = onProgress
 
   try {
     const result = await worker.recognize(imageSource)
     return result.data.text
   } finally {
-    await worker.terminate()
+    activeProgressCallback = undefined
   }
 }
 
@@ -136,8 +165,9 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
  * 解析截图中的收益标题（今日收益/昨日收益）
  */
 export function parseProfitLabel(text: string): ProfitLabelType {
-  if (text.includes('昨日收益')) return 'yesterday'
-  if (text.includes('今日收益')) return 'today'
+  const normalized = text.replace(/\s+/g, '')
+  if (normalized.includes('昨日收益')) return 'yesterday'
+  if (normalized.includes('今日收益')) return 'today'
   return 'unknown'
 }
 

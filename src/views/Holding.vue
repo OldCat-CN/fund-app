@@ -894,6 +894,10 @@ function handleSellClick(code: string, name = '') {
   }
   openTradeDialog('sell', code)
 }
+
+function openSyncHolding() {
+  showToast('同步持仓功能开发中')
+}
 </script>
 
 <template>
@@ -1060,9 +1064,9 @@ function handleSellClick(code: string, name = '') {
         </div>
 
         <div class="add-holding-wrap">
-          <van-button round type="primary" block @click="openAddDialog">
-            新增持有
-          </van-button>
+          <van-button class="holding-action-btn add" round type="primary" @click="openAddDialog">新增持有</van-button>
+          <van-button class="holding-action-btn import" round plain type="primary" @click="showImportDialog = true">导入持仓</van-button>
+          <van-button class="holding-action-btn sync" round plain type="primary" @click="openSyncHolding">同步持仓</van-button>
         </div>
       </template>
 
@@ -1789,6 +1793,26 @@ function handleSellClick(code: string, name = '') {
 .add-holding-wrap {
   padding: 14px 16px 4px;
   background: var(--bg-secondary);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.add-holding-wrap :deep(.holding-action-btn) {
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+.add-holding-wrap :deep(.holding-action-btn.add) {
+  box-shadow: 0 4px 10px rgba(25, 137, 250, 0.22);
+}
+
+.add-holding-wrap :deep(.holding-action-btn.import),
+.add-holding-wrap :deep(.holding-action-btn.sync) {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
 }
 
 .col-today, .col-profit {
@@ -1894,6 +1918,15 @@ function handleSellClick(code: string, name = '') {
   background: var(--bg-elevated);
   border-color: var(--border-strong);
   color: var(--text-primary);
+}
+
+:global([data-theme="dark"] .holding-page .holding-action-btn.import.van-button),
+:global([data-theme="dark"] .holding-page .holding-action-btn.sync.van-button),
+:global(:root:not([data-theme="light"]) .holding-page .holding-action-btn.import.van-button),
+:global(:root:not([data-theme="light"]) .holding-page .holding-action-btn.sync.van-button) {
+  background: #161B22 !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
 }
 
 /* 深色模式：基金名称与账户资产使用默认灰色 */
