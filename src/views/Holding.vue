@@ -98,6 +98,10 @@ const summaryTodayClass = computed(() => {
 })
 
 const pendingTradeCount = computed(() => holdingStore.pendingTrades.length)
+const showPendingTradesDialog = ref(false)
+const pendingTradeItems = computed(() => {
+  return [...holdingStore.pendingTrades].sort((a, b) => b.createdAt - a.createdAt)
+})
 const tradeHistorySummary = computed(() => {
   if (!historyFundCode.value) {
     return { items: [], realizedProfit: 0, floatingProfit: 0, totalProfit: 0 }
@@ -702,6 +706,40 @@ function displayMoney(value: number | string | undefined): string {
   if (!showDetail.value) return '*****'
   return formatMoney(value || 0)
 }
+
+function formatPendingTradeType(type: string): string {
+  if (type === 'buy') return '买入'
+  if (type === 'sell') return '卖出'
+  return '交易'
+}
+
+function formatPendingTradeDetail(item: {
+  type: string
+  amount?: number
+  shares?: number
+  period?: 'before_15' | 'after_15'
+  date: string
+}): string {
+  const side = item.type === 'buy'
+    ? `金额 ¥${(item.amount || 0).toFixed(2)}`
+    : `份额 ${(item.shares || 0).toFixed(2)}`
+  return `${item.date} · ${formatTradePeriod(item.period || 'before_15')} · ${side}`
+}
+
+async function cancelPendingTrade(id: string) {
+  try {
+    await showConfirmDialog({
+      title: '取消待确认交易',
+      message: '确认取消这笔待确认交易吗？'
+    })
+    const removed = holdingStore.removePendingTrade(id)
+    if (removed) {
+      showToast('已取消待确认交易')
+    }
+  } catch {
+    // 用户取消
+  }
+}
 </script>
 
 <template>
@@ -745,7 +783,7 @@ function displayMoney(value: number | string | undefined): string {
           </div>
         </div>
       </div>
-      <div v-if="pendingTradeCount > 0" class="pending-tip">
+      <div v-if="pendingTradeCount > 0" class="pending-tip" @click="showPendingTradesDialog = true">
         待确认交易 {{ pendingTradeCount }} 笔（基金公司公布当日净值后自动生效）
       </div>
     </div>
@@ -1181,6 +1219,36 @@ function displayMoney(value: number | string | undefined): string {
       v-model:show="showImportDialog"
       @imported="onImported"
     />
+
+    <!-- 待确认交易弹窗 -->
+    <van-popup
+      v-model:show="showPendingTradesDialog"
+      position="center"
+      round
+      :style="{ width: '92%', maxWidth: '520px', maxHeight: '72vh' }"
+    >
+      <div class="trade-history-dialog">
+        <div class="dialog-header">
+          <span>待确认交易</span>
+          <van-icon name="cross" @click="showPendingTradesDialog = false" />
+        </div>
+        <div class="dialog-content">
+          <div v-if="pendingTradeItems.length > 0" class="history-list">
+            <div v-for="item in pendingTradeItems" :key="item.id" class="history-item">
+              <div class="history-item-left">
+                <div class="history-type" :class="item.type">{{ formatPendingTradeType(item.type) }}</div>
+                <div class="history-detail">{{ item.name }} ({{ item.code }})</div>
+                <div class="history-meta">{{ formatPendingTradeDetail(item) }}</div>
+              </div>
+              <div class="history-item-right">
+                <van-button size="small" plain type="danger" @click="cancelPendingTrade(item.id)">取消</van-button>
+              </div>
+            </div>
+          </div>
+          <van-empty v-else description="暂无待确认交易" />
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -1285,6 +1353,7 @@ function displayMoney(value: number | string | undefined): string {
   color: var(--text-secondary);
   position: relative;
   z-index: 1;
+  cursor: pointer;
 }
 
 /* 列表表头 */

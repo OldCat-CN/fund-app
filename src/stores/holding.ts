@@ -456,6 +456,14 @@ export const useHoldingStore = defineStore('holding', () => {
     savePendingTrades(pendingTrades.value)
   }
 
+  function removePendingTrade(id: string): boolean {
+    const index = pendingTrades.value.findIndex(t => t.id === id)
+    if (index === -1) return false
+    pendingTrades.value.splice(index, 1)
+    savePendingTrades(pendingTrades.value)
+    return true
+  }
+
   function addTradeRecord(params: Omit<HoldingTradeRecord, 'id' | 'createdAt'>) {
     const record: HoldingTradeRecord = {
       ...params,
@@ -1063,6 +1071,7 @@ export const useHoldingStore = defineStore('holding', () => {
     updateTradeRecord,
     getTradePnLSummaryByFund,
     addModifyTradeRecord,
+    removePendingTrade,
     removeHolding,
     hasHolding,
     getHoldingByCode,
