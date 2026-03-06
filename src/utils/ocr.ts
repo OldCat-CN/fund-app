@@ -88,29 +88,30 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
     holdings.push(...multiLineHoldings)
   }
   
-  // [NEW] 如果仍然没有结果，尝试支付宝格式解析（只有名称没有代码）
-  if (holdings.length === 0) {
-    const alipayHoldings = parseAlipayFormat(lines)
-    holdings.push(...alipayHoldings)
-  }
-  
-  // [NEW] 对于有代码的结果，也尝试补充支付宝格式解析的结果
-  // 因为可能部分有代码部分没有
-  if (holdings.length > 0 && holdings.every(h => h.code)) {
-    const alipayHoldings = parseAlipayFormat(lines)
-    // 只添加名称不重复的
-    for (const ah of alipayHoldings) {
-      const exists = holdings.some(h => 
-        h.name === ah.name || 
-        (h.name && ah.name && h.name.includes(ah.name.substring(0, 4)))
+  // [WHAT] 始终尝试支付宝格式解析，补足“名称+金额分行”的场景
+  const alipayHoldings = parseAlipayFormat(lines)
+  for (const ah of alipayHoldings) {
+    const exists = holdings.some(h => {
+      const sameCode = !!h.code && !!ah.code && h.code === ah.code
+      const sameAmount = Math.abs((h.amount || 0) - (ah.amount || 0)) <= 0.01
+      const hasEnoughNameInfo = !!h.name && !!ah.name && h.name.length >= 4 && ah.name.length >= 4
+      const sameName = hasEnoughNameInfo && (
+        h.name === ah.name ||
+        h.name.includes(ah.name.slice(0, 4)) ||
+        ah.name.includes(h.name.slice(0, 4))
       )
-      if (!exists) {
-        holdings.push(ah)
-      }
-    }
+      return sameCode || (sameAmount && sameName)
+    })
+    if (!exists) holdings.push(ah)
   }
-  
-  return holdings
+
+  // [WHAT] 过滤明显噪音结果
+  return holdings.filter(h => {
+    if (h.amount < 10) return false
+    if (!h.code && (!h.name || h.name.length < 3)) return false
+    if (!h.code && /^(ETF|基金|持仓)$/i.test(h.name.trim())) return false
+    return true
+  })
 }
 
 /**
@@ -233,49 +234,52 @@ function parseAlipayFormat(lines: string[]): RecognizedHolding[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line) continue
-    
-    // [WHAT] 检查是否包含基金名称关键词
-    const isFundName = fundKeywords.some(kw => line.includes(kw))
-    const isExcluded = excludeKeywords.some(kw => line.includes(kw) && !fundKeywords.some(fkw => line.includes(fkw)))
-    
-    if (isFundName && !isExcluded && line.length >= 4 && line.length <= 30) {
-      // [WHAT] 尝试从当前行或附近行提取金额
-      let amount = 0
-      
-      // 检查当前行是否包含金额
-      const amountInLine = line.match(/[\d,]+\.\d{2}/)
-      if (amountInLine) {
-        amount = parseAmount(amountInLine[0])
-      }
-      
-      // 检查下几行是否有金额
-      if (amount === 0) {
-        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-          const nextLine = lines[j].trim()
-          const amountMatch = nextLine.match(/^[¥￥]?\s*([\d,]+\.\d{2})/)
-          if (amountMatch) {
-            amount = parseAmount(amountMatch[1])
-            break
-          }
-        }
-      }
-      
-      // [WHAT] 清理基金名称
-      const cleanedName = cleanFundName(line.replace(/[\d,]+\.\d{2}/, '').trim())
-      
-      if (cleanedName.length >= 3 && amount >= 10) {
-        // [WHAT] 检查是否已添加相同名称
-        const exists = holdings.some(h => h.name === cleanedName)
-        if (!exists) {
-          holdings.push({
-            code: '',
-            name: cleanedName,
-            amount,
-            confidence: 0.5,
-            needsCodeMatch: true // [WHAT] 标记需要手动匹配代码
-          })
-        }
-      }
+
+    // [WHAT] 从当前行提取“主金额”（通常是持仓金额，>=100）
+    const amountTokens = line.match(/\d[\d,\.]*\.\d{2}/g) || []
+    const amountCandidates = amountTokens
+      .map(token => parseAmount(token))
+      .filter(amount => amount >= 100)
+    const amount = amountCandidates.length ? Math.max(...amountCandidates) : 0
+    if (amount <= 0) continue
+
+    // [WHAT] 名称可能分两行：当前行+下一行
+    const nextLine = (lines[i + 1] || '').trim()
+    let nameCandidate = cleanFundName(
+      line
+        .replace(/\d[\d,\.]*\.\d{2}/g, '')
+        .replace(/[+\-]\d[\d,\.]*\.\d{2}%?/g, '')
+        .replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '')
+    )
+
+    const hasKeyword = fundKeywords.some(kw => nameCandidate.includes(kw))
+    const shouldAppendNextLine =
+      !hasKeyword ||
+      nameCandidate.length < 6 ||
+      /(联|接|起|式)$/.test(nameCandidate)
+    if (shouldAppendNextLine && nextLine) {
+      const nextNamePart = cleanFundName(
+        nextLine
+          .replace(/\d[\d,\.]*\.\d{2}/g, '')
+          .replace(/[+\-]\d[\d,\.]*\.\d{2}%?/g, '')
+          .replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '')
+      )
+      nameCandidate = `${nameCandidate}${nextNamePart}`
+    }
+
+    const isFundName = fundKeywords.some(kw => nameCandidate.includes(kw))
+    const isExcluded = excludeKeywords.some(kw => nameCandidate.includes(kw)) && !isFundName
+    if (!nameCandidate || nameCandidate.length < 3 || isExcluded) continue
+
+    const exists = holdings.some(h => h.name === nameCandidate || Math.abs(h.amount - amount) <= 0.01)
+    if (!exists) {
+      holdings.push({
+        code: '',
+        name: nameCandidate,
+        amount,
+        confidence: 0.65,
+        needsCodeMatch: true
+      })
     }
   }
   
@@ -367,6 +371,7 @@ function cleanFundName(name: string): string {
   return name
     .replace(/持有|金额|收益|份额|净值|估值/g, '')
     .replace(/[¥￥%]/g, '')
+    .replace(/[为儿]$/g, '')
     .trim()
 }
 
@@ -375,7 +380,15 @@ function cleanFundName(name: string): string {
  * [WHY] 处理各种金额格式（带逗号、带货币符号等）
  */
 function parseAmount(amountStr: string): number {
-  const cleaned = amountStr.replace(/[,¥￥\s]/g, '')
+  let cleaned = amountStr.replace(/[¥￥\s]/g, '').replace(/,/g, '')
+  // [WHY] OCR 常见误识别："1.479.28" 实际应为 "1479.28"
+  const dotCount = (cleaned.match(/\./g) || []).length
+  if (dotCount > 1) {
+    const lastDotIndex = cleaned.lastIndexOf('.')
+    const intPart = cleaned.slice(0, lastDotIndex).replace(/\./g, '')
+    const fracPart = cleaned.slice(lastDotIndex + 1)
+    cleaned = `${intPart}.${fracPart}`
+  }
   const amount = parseFloat(cleaned)
   return isNaN(amount) ? 0 : amount
 }
