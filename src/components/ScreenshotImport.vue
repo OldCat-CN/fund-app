@@ -119,11 +119,13 @@ async function startRecognition(file: File) {
   ocrStatus.value = '准备识别...'
   
   try {
+    const ocrSource = await prepareOcrImageSource(file)
+
     if (preloadingEngine.value) {
       ocrStatus.value = '识别引擎预加载中...'
     }
 
-    const snapshot = await recognizeHoldingSnapshot(file, (progress, status) => {
+    const snapshot = await recognizeHoldingSnapshot(ocrSource, (progress, status) => {
       ocrProgress.value = Math.round(progress * 100)
       ocrStatus.value = status
     })
@@ -145,6 +147,38 @@ async function startRecognition(file: File) {
     console.error('OCR识别失败:', error)
     showToast('识别失败，请重试')
     step.value = 'upload'
+  }
+}
+
+async function prepareOcrImageSource(file: File): Promise<File | string> {
+  try {
+    const maxEdge = 2400
+    const bitmap = await createImageBitmap(file)
+    const width = bitmap.width
+    const height = bitmap.height
+    const longest = Math.max(width, height)
+    if (longest <= maxEdge) {
+      bitmap.close()
+      return file
+    }
+
+    const scale = maxEdge / longest
+    const targetWidth = Math.max(1, Math.round(width * scale))
+    const targetHeight = Math.max(1, Math.round(height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = targetWidth
+    canvas.height = targetHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      bitmap.close()
+      return file
+    }
+
+    ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
+    bitmap.close()
+    return canvas.toDataURL('image/jpeg', 0.92)
+  } catch {
+    return file
   }
 }
 
@@ -846,10 +880,10 @@ function formatAmount(amount: number): string {
 }
 
 .preview-image img {
-  max-width: 100%;
+  height: 100%;
   max-height: 100%;
+  max-width: 100%;
   width: auto;
-  height: auto;
   object-fit: contain;
   border-radius: 8px;
 }
