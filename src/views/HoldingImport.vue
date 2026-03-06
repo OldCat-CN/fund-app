@@ -42,6 +42,6 @@ function handleVisibilityChange(show: boolean) {
 .import-content {
   flex: 1;
   min-height: 0;
-  padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+  padding: 0 0 env(safe-area-inset-bottom);
 }
 </style>

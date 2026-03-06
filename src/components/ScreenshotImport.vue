@@ -776,9 +776,9 @@ function handleWrapperShowUpdate(value: boolean) {
 .import-dialog.embedded {
   height: 100%;
   min-height: 0;
-  border-radius: 18px;
-  border: 1px solid var(--border-color);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
 }
 
 .dialog-header {
@@ -885,25 +885,24 @@ function handleWrapperShowUpdate(value: boolean) {
 
 .preview-image {
   flex: 1;
-  overflow: hidden;
+  overflow: auto;
   border-radius: 12px;
   background: var(--bg-primary);
   padding: 8px;
 }
 
 .preview-image-inner {
-  height: 100%;
+  min-height: 100%;
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
 }
 
 .preview-image img {
-  height: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: auto;
   max-width: 100%;
-  width: auto;
   object-fit: contain;
   border-radius: 8px;
 }

@@ -96,7 +96,7 @@ function getLastTab(): number {
 const activeTab = ref(getLastTab())
 
 // [WHAT] 需要隐藏底部导航的页面
-const hiddenTabbarPages = ['search', 'detail', 'trades']
+const hiddenTabbarPages = ['search', 'detail', 'trades', 'holdingImport']
 const showTabbar = computed(() => !hiddenTabbarPages.includes(route.name as string))
 
 // [WHY] 路由变化时同步更新 tab 状态
