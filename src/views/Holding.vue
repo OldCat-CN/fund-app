@@ -110,19 +110,28 @@ const pendingCountByCode = computed(() => {
 })
 const pendingOnlyItems = computed(() => {
   const holdingCodes = new Set(holdingStore.holdings.map(h => h.code))
-  const grouped = new Map<string, { code: string; name: string; count: number; latestCreatedAt: number }>()
+  const grouped = new Map<string, {
+    code: string
+    name: string
+    count: number
+    latestCreatedAt: number
+    pendingBuyAmount: number
+  }>()
   holdingStore.pendingTrades.forEach((trade) => {
     if (holdingCodes.has(trade.code)) return
     const existing = grouped.get(trade.code)
+    const buyAmount = trade.type === 'buy' ? (trade.amount || 0) : 0
     if (existing) {
       existing.count += 1
       if (trade.createdAt > existing.latestCreatedAt) existing.latestCreatedAt = trade.createdAt
+      existing.pendingBuyAmount += buyAmount
     } else {
       grouped.set(trade.code, {
         code: trade.code,
         name: trade.name || trade.code,
         count: 1,
-        latestCreatedAt: trade.createdAt
+        latestCreatedAt: trade.createdAt,
+        pendingBuyAmount: buyAmount
       })
     }
   })
@@ -972,8 +981,8 @@ function handleSellClick(code: string, name = '') {
             <div class="fund-name">{{ pendingItem.name }}</div>
             <div class="fund-code">{{ pendingItem.code }}</div>
             <div class="fund-meta">
-              <span class="tag pending">待更新</span>
-              <span class="amount">--</span>
+              <span class="tag pending">待确认</span>
+              <span class="amount">¥{{ displayMoney(pendingItem.pendingBuyAmount) }}</span>
             </div>
             <div
               class="pending-inline-tip"
