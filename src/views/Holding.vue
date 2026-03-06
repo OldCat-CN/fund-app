@@ -74,6 +74,10 @@ const historyFundName = ref('')
 const showDetail = ref(true)
 type TradeHistoryTab = 'all' | 'buy' | 'sell' | 'auto_invest' | 'switch' | 'dividend' | 'modify'
 const activeTradeHistoryTab = ref<TradeHistoryTab>('all')
+type HoldingSortMode = 'none' | 'rate_desc' | 'rate_asc' | 'amount_desc' | 'amount_asc'
+type HoldingSortKey = 'today' | 'profit'
+const activeHoldingSortKey = ref<HoldingSortKey | ''>('')
+const holdingSortMode = ref<HoldingSortMode>('none')
 
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
@@ -138,6 +142,27 @@ const pendingOnlyItems = computed(() => {
   return Array.from(grouped.values()).sort((a, b) => b.latestCreatedAt - a.latestCreatedAt)
 })
 const hasHoldingListItems = computed(() => holdingStore.holdings.length > 0 || pendingOnlyItems.value.length > 0)
+const sortedHoldings = computed(() => {
+  const list = [...holdingStore.holdings]
+  if (!activeHoldingSortKey.value || holdingSortMode.value === 'none') return list
+
+  const key = activeHoldingSortKey.value
+  const mode = holdingSortMode.value
+  const rateKey = key === 'today' ? 'todayChange' : 'profitRate'
+  const amountKey = key === 'today' ? 'todayProfit' : 'profit'
+  const factor = mode.endsWith('_asc') ? 1 : -1
+  const useRate = mode.startsWith('rate')
+
+  return list.sort((a, b) => {
+    const aVal = useRate
+      ? parseFloat((a[rateKey] as string | number | undefined) as string) || 0
+      : (a[amountKey] as number | undefined) || 0
+    const bVal = useRate
+      ? parseFloat((b[rateKey] as string | number | undefined) as string) || 0
+      : (b[amountKey] as number | undefined) || 0
+    return (aVal - bVal) * factor
+  })
+})
 const pendingOnlyDayChangeMap = ref<Record<string, number>>({})
 const pendingTradeItems = computed(() => {
   const list = activePendingTradeCode.value
@@ -800,6 +825,27 @@ function openPendingTradesDialog(code = '', name = '') {
   showPendingTradesDialog.value = true
 }
 
+function toggleHoldingSort(key: HoldingSortKey) {
+  const sortFlow: HoldingSortMode[] = ['none', 'rate_desc', 'rate_asc', 'amount_desc', 'amount_asc']
+  if (activeHoldingSortKey.value !== key) {
+    activeHoldingSortKey.value = key
+    holdingSortMode.value = 'rate_desc'
+    return
+  }
+  const currentIndex = sortFlow.indexOf(holdingSortMode.value)
+  const nextIndex = (currentIndex + 1) % sortFlow.length
+  holdingSortMode.value = sortFlow[nextIndex] || 'none'
+  if (holdingSortMode.value === 'none') {
+    activeHoldingSortKey.value = ''
+  }
+}
+
+function getSortIconClass(key: HoldingSortKey): string {
+  if (activeHoldingSortKey.value !== key || holdingSortMode.value === 'none') return 'sort-none'
+  if (holdingSortMode.value.endsWith('desc')) return 'sort-desc'
+  return 'sort-asc'
+}
+
 watch(
   pendingOnlyItems,
   async (items) => {
@@ -899,12 +945,18 @@ function handleSellClick(code: string, name = '') {
     <!-- 持仓列表表头 -->
     <div v-if="hasHoldingListItems" class="list-header">
       <span class="col-name">基金名称</span>
-      <span class="col-today">
-        <span>当日收益</span>
+      <span class="col-today sortable-header" @click="toggleHoldingSort('today')">
+        <span class="header-main">
+          <span>当日收益/率</span>
+          <van-icon name="sort" class="sort-icon" :class="getSortIconClass('today')" />
+        </span>
         <span class="header-date">{{ todayColumnDateLabel }}</span>
       </span>
-      <span class="col-profit">
-        <span>持有收益</span>
+      <span class="col-profit sortable-header" @click="toggleHoldingSort('profit')">
+        <span class="header-main">
+          <span>持有收益/率</span>
+          <van-icon name="sort" class="sort-icon" :class="getSortIconClass('profit')" />
+        </span>
         <span class="header-date">{{ holdingColumnDateLabel }}</span>
       </span>
     </div>
@@ -916,7 +968,7 @@ function handleSellClick(code: string, name = '') {
       class="holding-list-container"
     >
       <template v-if="hasHoldingListItems">
-        <van-swipe-cell v-for="holding in holdingStore.holdings" :key="holding.code">
+        <van-swipe-cell v-for="holding in sortedHoldings" :key="holding.code">
           <div class="holding-item" :class="getHoldingItemBgClass(holding.todayProfit)" @click="goToDetail(holding.code)">
             <div class="col-name">
               <div class="fund-name">{{ holding.name || '加载中...' }}</div>
@@ -1538,6 +1590,29 @@ function handleSellClick(code: string, name = '') {
 .list-header .header-date {
   font-size: 10px;
   color: var(--text-muted);
+}
+
+.sortable-header {
+  cursor: pointer;
+}
+
+.header-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sort-icon {
+  font-size: 12px;
+}
+
+.sort-icon.sort-none {
+  color: var(--text-muted);
+}
+
+.sort-icon.sort-desc,
+.sort-icon.sort-asc {
+  color: var(--color-primary);
 }
 
 /* 持仓列表 */
