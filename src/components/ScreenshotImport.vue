@@ -14,6 +14,7 @@ import type { HoldingRecord, FundInfo } from '@/types/fund'
 
 const props = defineProps<{
   show: boolean
+  embedded?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -152,7 +153,7 @@ async function startRecognition(file: File) {
 
 async function prepareOcrImageSource(file: File): Promise<File | string> {
   try {
-    const maxEdge = 2400
+    const maxEdge = 2600
     const bitmap = await createImageBitmap(file)
     const width = bitmap.width
     const height = bitmap.height
@@ -176,7 +177,7 @@ async function prepareOcrImageSource(file: File): Promise<File | string> {
 
     ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
     bitmap.close()
-    return canvas.toDataURL('image/jpeg', 0.92)
+    return canvas.toDataURL('image/png')
   } catch {
     return file
   }
@@ -574,17 +575,24 @@ function getConfidenceColor(confidence: number): string {
 function formatAmount(amount: number): string {
   return amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
+
+function handleWrapperShowUpdate(value: boolean) {
+  emit('update:show', value)
+}
 </script>
 
 <template>
-  <van-popup
-    :show="props.show"
-    position="center"
-    round
-    :style="{ width: '92%', maxWidth: '560px', maxHeight: '86vh' }"
-    @update:show="emit('update:show', $event)"
+  <component
+    :is="props.embedded ? 'div' : 'van-popup'"
+    :show="props.embedded ? true : props.show"
+    :position="props.embedded ? undefined : 'center'"
+    :round="!props.embedded"
+    :overlay="props.embedded ? false : undefined"
+    :style="props.embedded ? undefined : { width: '92%', maxWidth: '560px', maxHeight: '86vh' }"
+    :class="{ 'import-embedded-shell': !!props.embedded }"
+    @update:show="handleWrapperShowUpdate"
   >
-    <div class="import-dialog">
+    <div class="import-dialog" :class="{ embedded: !!props.embedded }">
       <!-- 标题栏 -->
       <div class="dialog-header">
         <span>截图导入持仓</span>
@@ -748,10 +756,14 @@ function formatAmount(amount: number): string {
         <p>正在导入...</p>
       </div>
     </div>
-  </van-popup>
+  </component>
 </template>
 
 <style scoped>
+.import-embedded-shell {
+  height: 100%;
+}
+
 .import-dialog {
   height: min(86vh, 760px);
   display: flex;
@@ -759,6 +771,14 @@ function formatAmount(amount: number): string {
   background: var(--bg-secondary);
   border-radius: 16px;
   overflow: hidden;
+}
+
+.import-dialog.embedded {
+  height: 100%;
+  min-height: 0;
+  border-radius: 18px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
 }
 
 .dialog-header {

@@ -25,6 +25,12 @@ const router = createRouter({
       meta: { title: '持仓' }
     },
     {
+      path: '/holding/import',
+      name: 'holdingImport',
+      component: () => import('@/views/HoldingImport.vue'),
+      meta: { title: '截图导入持仓' }
+    },
+    {
       path: '/analysis',
       name: 'analysis',
       component: () => import('@/views/Analysis.vue'),

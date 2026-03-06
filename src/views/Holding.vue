@@ -12,7 +12,6 @@ import { hasMarketOpenedToday, isTradingDay } from '@/api/tiantianApi'
 import { showConfirmDialog, showToast } from 'vant'
 import { formatMoney, formatPercent, getChangeStatus } from '@/utils/format'
 import type { FundInfo, HoldingRecord, FundShareClass } from '@/types/fund'
-import ScreenshotImport from '@/components/ScreenshotImport.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -23,8 +22,6 @@ const SHOW_DETAIL_KEY = 'holding_show_detail'
 const showAddDialog = ref(false)
 const isEditing = ref(false)
 
-// ========== 截图导入相关 ==========
-const showImportDialog = ref(false)
 const formData = ref({
   code: '',
   name: '',
@@ -645,12 +642,6 @@ function formatTradeMeta(item: {
   return `${item.date} · ${formatTradePeriod(item.period)}`
 }
 
-// [WHAT] 截图导入完成回调
-function onImported(count: number) {
-  // [WHAT] 导入完成后刷新持仓列表
-  holdingStore.refreshEstimates()
-}
-
 // ========== 日期选择器 ==========
 const showDatePicker = ref(false)
 const datePickerMode = ref<'trade'>('trade')
@@ -898,6 +889,10 @@ function handleSellClick(code: string, name = '') {
 function openSyncHolding() {
   showToast('同步持仓功能开发中')
 }
+
+function openImportPage() {
+  router.push('/holding/import')
+}
 </script>
 
 <template>
@@ -907,7 +902,7 @@ function openSyncHolding() {
       <template #right>
         <div class="nav-actions">
           <van-icon :name="showDetail ? 'eye-o' : 'closed-eye'" size="20" @click="toggleDetail" />
-          <van-icon name="photo-o" size="20" @click="showImportDialog = true" />
+          <van-icon name="photo-o" size="20" @click="openImportPage" />
           <van-icon name="add-o" size="20" @click="openAddDialog" />
         </div>
       </template>
@@ -1065,7 +1060,7 @@ function openSyncHolding() {
 
         <div class="add-holding-wrap">
           <van-button class="holding-action-btn add" round type="primary" @click="openAddDialog">新增持有</van-button>
-          <van-button class="holding-action-btn import" round plain type="primary" @click="showImportDialog = true">导入持仓</van-button>
+          <van-button class="holding-action-btn import" round plain type="primary" @click="openImportPage">导入持仓</van-button>
           <van-button class="holding-action-btn sync" round plain type="primary" @click="openSyncHolding">同步持仓</van-button>
         </div>
       </template>
@@ -1416,12 +1411,6 @@ function openSyncHolding() {
         </div>
       </div>
     </van-popup>
-
-    <!-- 截图导入弹窗 -->
-    <ScreenshotImport 
-      v-model:show="showImportDialog"
-      @imported="onImported"
-    />
 
     <!-- 待确认交易弹窗 -->
     <van-popup
