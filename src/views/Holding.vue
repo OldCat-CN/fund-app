@@ -560,15 +560,16 @@ function formatTradeMeta(item: {
   createdAt: number
 }): string {
   const writeTime = new Date(item.createdAt).toLocaleString('zh-CN', {
+    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit'
   })
   if (item.type === 'modify') {
-    return `写入时间：${writeTime}`
+    return `修改时间：${writeTime}`
   }
-  return `${item.date} · ${formatTradePeriod(item.period)} · 写入 ${writeTime}`
+  return `${item.date} · ${formatTradePeriod(item.period)}`
 }
 
 // [WHAT] 截图导入完成回调
@@ -1018,11 +1019,7 @@ async function cancelPendingTrade(id: string) {
                     份额：{{ item.modifySnapshot.before.shares.toFixed(2) }}份 -> {{ item.modifySnapshot.after.shares.toFixed(2) }}份
                   </div>
                   <div class="history-detail">
-                    市值：{{ displayMoney(item.modifyDiff.beforeValue) }} -> {{ displayMoney(item.modifyDiff.afterValue) }}
-                  </div>
-                  <div class="history-detail">
-                    收益：{{ displayMoney(item.modifyDiff.beforeProfit) }} -> {{ displayMoney(item.modifyDiff.afterProfit) }}
-                    ｜收益率：{{ formatPercent(item.modifyDiff.beforeProfitRate) }} -> {{ formatPercent(item.modifyDiff.afterProfitRate) }}
+                    成本金额：{{ displayMoney(item.modifySnapshot.before.amount) }} -> {{ displayMoney(item.modifySnapshot.after.amount) }}
                   </div>
                 </template>
                 <div v-else class="history-detail">
@@ -1241,7 +1238,7 @@ async function cancelPendingTrade(id: string) {
                 <div class="history-meta">{{ formatPendingTradeDetail(item) }}</div>
               </div>
               <div class="history-item-right">
-                <van-button size="small" plain type="danger" @click="cancelPendingTrade(item.id)">取消</van-button>
+                <van-button class="pending-cancel-btn" size="small" plain type="danger" @click="cancelPendingTrade(item.id)">取消</van-button>
               </div>
             </div>
           </div>
@@ -1636,6 +1633,13 @@ async function cancelPendingTrade(id: string) {
   color: var(--color-down-bright) !important;
 }
 
+:global([data-theme="dark"] .holding-page .pending-cancel-btn),
+:global(:root:not([data-theme="light"]) .holding-page .pending-cancel-btn) {
+  background: #161B22 !important;
+  border-color: var(--border-strong) !important;
+  color: #FF8787 !important;
+}
+
 /* 深色模式与未显式设置 light 时，持仓行背景保持纯背景 */
 :global([data-theme="dark"] .holding-page .holding-item.holding-bg-up),
 :global([data-theme="dark"] .holding-page .holding-item.holding-bg-down),
@@ -1937,6 +1941,11 @@ async function cancelPendingTrade(id: string) {
 .history-note {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.pending-cancel-btn {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
 }
 
 .quick-buy-hint {
