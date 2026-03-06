@@ -183,6 +183,18 @@ body {
   color: var(--color-primary) !important;
 }
 
+[data-theme="dark"] .van-dialog__cancel.van-button,
+:root:not([data-theme="light"]) .van-dialog__cancel.van-button {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .van-dialog__confirm.van-button,
+:root:not([data-theme="light"]) .van-dialog__confirm.van-button {
+  background: var(--bg-elevated) !important;
+  border-color: var(--border-strong) !important;
+}
+
 .van-cell {
   background: var(--bg-secondary) !important;
   color: var(--text-primary) !important;

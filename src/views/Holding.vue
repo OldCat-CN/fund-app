@@ -8,6 +8,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useHoldingStore } from '@/stores/holding'
 import { searchFund, detectShareClass } from '@/api/fund'
 import { fetchFundAccurateData } from '@/api/fundFast'
+import { hasMarketOpenedToday, isTradingDay } from '@/api/tiantianApi'
 import { showConfirmDialog, showToast } from 'vant'
 import { formatMoney, formatPercent, getChangeStatus } from '@/utils/format'
 import type { FundInfo, HoldingRecord, FundShareClass } from '@/types/fund'
@@ -615,8 +616,78 @@ function getHoldingItemBgClass(todayProfit?: number): string {
   return todayProfit > 0 ? 'holding-bg-up' : 'holding-bg-down'
 }
 
-function getHoldingUpdateLabel(holding: { valueSource?: 'nav' | 'estimate' | 'fallback' }): string {
-  return holding.valueSource === 'estimate' ? '预测值' : '已更新'
+function formatShortDate(date?: string): string {
+  if (!date || date.length < 10) return '-'
+  return date.slice(5, 10)
+}
+
+function isTodayProfitUnavailable(holding: {
+  valueSource?: 'nav' | 'estimate' | 'fallback'
+  navDate?: string
+}): boolean {
+  if (!(isTradingDay() && hasMarketOpenedToday())) return false
+  const hasTodayNav = holding.valueSource === 'nav' && holding.navDate === todayDate
+  const hasEstimate = holding.valueSource === 'estimate'
+  return !hasTodayNav && !hasEstimate
+}
+
+function getHoldingUpdateLabel(holding: {
+  valueSource?: 'nav' | 'estimate' | 'fallback'
+  navDate?: string
+}): string {
+  if (holding.valueSource === 'estimate' || holding.valueSource === 'fallback') return '预测值'
+  if (holding.valueSource === 'nav') {
+    if (isTradingDay() && hasMarketOpenedToday() && holding.navDate !== todayDate) return '预测值'
+    return '已更新'
+  }
+  return '预测值'
+}
+
+function getTodayProfitText(holding: {
+  todayProfit?: number
+  valueSource?: 'nav' | 'estimate' | 'fallback'
+  navDate?: string
+}): string {
+  if (isTodayProfitUnavailable(holding)) return '-'
+  if (holding.todayProfit === undefined) return '--'
+  return `${holding.todayProfit >= 0 ? '+' : ''}${formatMoney(holding.todayProfit)}`
+}
+
+function getTodayChangeText(holding: {
+  todayChange?: string
+  valueSource?: 'nav' | 'estimate' | 'fallback'
+  navDate?: string
+}): string {
+  if (isTodayProfitUnavailable(holding)) return '-'
+  return formatPercent(holding.todayChange || 0)
+}
+
+function getTodayProfitClassValue(holding: {
+  todayProfit?: number
+  valueSource?: 'nav' | 'estimate' | 'fallback'
+  navDate?: string
+}): number {
+  if (isTodayProfitUnavailable(holding)) return 0
+  return holding.todayProfit || 0
+}
+
+function getTodayProfitDateLabel(holding: {
+  valueSource?: 'nav' | 'estimate' | 'fallback'
+  navDate?: string
+}): string {
+  if (isTodayProfitUnavailable(holding)) return '-'
+  if (holding.valueSource === 'estimate') return formatShortDate(todayDate)
+  return formatShortDate(holding.navDate)
+}
+
+function getHoldingProfitDateLabel(holding: {
+  valueSource?: 'nav' | 'estimate' | 'fallback'
+  navDate?: string
+}): string {
+  if (holding.valueSource === 'estimate' && isTradingDay() && hasMarketOpenedToday()) {
+    return formatShortDate(todayDate)
+  }
+  return formatShortDate(holding.navDate)
 }
 
 function toggleDetail() {
@@ -709,12 +780,15 @@ function displayMoney(value: number | string | undefined): string {
                 <van-button class="trade-btn history" size="mini" type="primary" plain @click="openTradeHistoryDialog(holding.code)">交易记录</van-button>
               </div>
             </div>
-            <div class="col-today" :class="getChangeStatus(holding.todayProfit || 0)">
+            <div class="col-today" :class="getChangeStatus(getTodayProfitClassValue(holding))">
               <div class="profit-amount">
-                {{ showDetail ? (holding.todayProfit !== undefined ? (holding.todayProfit >= 0 ? '+' : '') + formatMoney(holding.todayProfit) : '--') : '*****' }}
+                {{ showDetail ? getTodayProfitText(holding) : '*****' }}
               </div>
               <div class="profit-rate">
-                {{ formatPercent(holding.todayChange || 0) }}
+                {{ getTodayChangeText(holding) }}
+              </div>
+              <div class="profit-date">
+                {{ getTodayProfitDateLabel(holding) }}
               </div>
             </div>
             <div class="col-profit" :class="getChangeStatus(holding.profit || 0)">
@@ -723,6 +797,9 @@ function displayMoney(value: number | string | undefined): string {
               </div>
               <div class="profit-rate">
                 {{ holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--' }}
+              </div>
+              <div class="profit-date">
+                {{ getHoldingProfitDateLabel(holding) }}
               </div>
             </div>
           </div>
@@ -1212,7 +1289,7 @@ function displayMoney(value: number | string | undefined): string {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
   padding: 12px 16px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
@@ -1421,6 +1498,13 @@ function displayMoney(value: number | string | undefined): string {
 .col-profit .profit-rate {
   font-size: 12px;
   opacity: 0.8;
+}
+
+.col-today .profit-date,
+.col-profit .profit-date {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .col-today.up .profit-amount,
