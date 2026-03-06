@@ -20,6 +20,24 @@ export interface RecognizedHolding {
   confidence: number
   /** 是否需要手动匹配代码（名称识别但无代码） */
   needsCodeMatch?: boolean
+  /** 持仓收益金额（右侧累计收益），可能识别失败 */
+  holdingProfit?: number
+  /** 持仓收益率（%），可能识别失败 */
+  holdingProfitRate?: number
+}
+
+/**
+ * 收益标题类型（截图顶部）
+ */
+export type ProfitLabelType = 'today' | 'yesterday' | 'unknown'
+
+/**
+ * OCR 持仓快照结果（含收益标题）
+ */
+export interface RecognizedHoldingSnapshot {
+  holdings: RecognizedHolding[]
+  profitLabel: ProfitLabelType
+  rawText: string
 }
 
 /**
@@ -112,6 +130,15 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
     if (!h.code && /^(ETF|基金|持仓)$/i.test(h.name.trim())) return false
     return true
   })
+}
+
+/**
+ * 解析截图中的收益标题（今日收益/昨日收益）
+ */
+export function parseProfitLabel(text: string): ProfitLabelType {
+  if (text.includes('昨日收益')) return 'yesterday'
+  if (text.includes('今日收益')) return 'today'
+  return 'unknown'
 }
 
 /**
@@ -273,12 +300,21 @@ function parseAlipayFormat(lines: string[]): RecognizedHolding[] {
 
     const exists = holdings.some(h => h.name === nameCandidate || Math.abs(h.amount - amount) <= 0.01)
     if (!exists) {
+      const currentSignedNumbers = extractSignedNumbers(line)
+      const nextSignedNumbers = extractSignedNumbers(nextLine)
+      const holdingProfit =
+        currentSignedNumbers.length > 0
+          ? currentSignedNumbers[currentSignedNumbers.length - 1]
+          : undefined
+      const holdingProfitRate = pickHoldingProfitRate(nextSignedNumbers, currentSignedNumbers)
       holdings.push({
         code: '',
         name: nameCandidate,
         amount,
         confidence: 0.65,
-        needsCodeMatch: true
+        needsCodeMatch: true,
+        holdingProfit,
+        holdingProfitRate
       })
     }
   }
@@ -394,6 +430,45 @@ function parseAmount(amountStr: string): number {
 }
 
 /**
+ * 提取带符号的小数（支持 OCR 异常格式）
+ */
+function extractSignedNumbers(line: string): number[] {
+  const tokens = line.match(/[+\-]\d[\d,\.]*\.\d{2}%?/g) || []
+  return tokens
+    .map(token => parseAmount(token.replace('%', '')))
+    .filter(num => !isNaN(num) && isFinite(num))
+}
+
+/**
+ * 选择持仓收益率（优先使用下一行最后一个带符号数）
+ */
+function pickHoldingProfitRate(nextLineNums: number[], currentLineNums: number[]): number | undefined {
+  const fromNext = [...nextLineNums]
+    .reverse()
+    .find(num => Math.abs(num) <= 100)
+  if (fromNext !== undefined) return fromNext
+  const fromCurrent = [...currentLineNums]
+    .reverse()
+    .find(num => Math.abs(num) <= 100)
+  return fromCurrent
+}
+
+/**
+ * 从图片识别并解析持仓快照（持仓 + 收益标题）
+ */
+export async function recognizeHoldingSnapshot(
+  imageSource: File | string,
+  onProgress?: OcrProgressCallback
+): Promise<RecognizedHoldingSnapshot> {
+  const text = await recognizeText(imageSource, onProgress)
+  return {
+    holdings: parseHoldingText(text),
+    profitLabel: parseProfitLabel(text),
+    rawText: text
+  }
+}
+
+/**
  * 从图片识别并解析持仓信息
  * [WHY] 一站式接口，图片 -> 持仓列表
  */
@@ -401,11 +476,6 @@ export async function recognizeHoldings(
   imageSource: File | string,
   onProgress?: OcrProgressCallback
 ): Promise<RecognizedHolding[]> {
-  // [WHAT] 第一步：OCR 识别文字
-  const text = await recognizeText(imageSource, onProgress)
-  
-  // [WHAT] 第二步：解析持仓信息
-  const holdings = parseHoldingText(text)
-  
-  return holdings
+  const snapshot = await recognizeHoldingSnapshot(imageSource, onProgress)
+  return snapshot.holdings
 }

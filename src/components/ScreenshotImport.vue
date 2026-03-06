@@ -1,13 +1,14 @@
 <script setup lang="ts">
 // [WHY] 截图导入组件 - 通过 OCR 识别截图中的持仓信息
-// [WHAT] 支持拍照/选择图片，识别基金持仓并批量导入
+// [WHAT] 支持选择图片，识别基金持仓并批量导入
 // [WHAT] 支持通过名称搜索匹配基金代码，支持已持有基金的加仓
 // [DEPS] 依赖 ocr.ts 进行文字识别
 
 import { ref, computed } from 'vue'
 import { showToast, showLoadingToast, closeToast } from 'vant'
-import { recognizeHoldings, type RecognizedHolding } from '@/utils/ocr'
-import { searchFund, fetchFundEstimate } from '@/api/fund'
+import { recognizeHoldingSnapshot, type RecognizedHolding, type ProfitLabelType } from '@/utils/ocr'
+import { searchFund } from '@/api/fund'
+import { fetchFundAccurateData, fetchNetValueHistoryFast } from '@/api/fundFast'
 import { useHoldingStore } from '@/stores/holding'
 import type { HoldingRecord, FundInfo } from '@/types/fund'
 
@@ -28,12 +29,17 @@ const selectedImage = ref<string>('')
 const ocrProgress = ref(0)
 const ocrStatus = ref('')
 const recognizedHoldings = ref<RecognizedHolding[]>([])
-const selectedCodes = ref<Set<string>>(new Set())
+const snapshotProfitLabel = ref<ProfitLabelType>('unknown')
 
 // [WHAT] 增强后的持仓信息（包含从 API 获取的名称和净值）
 interface EnhancedHolding extends RecognizedHolding {
   fundInfo?: FundInfo
-  netValue?: number
+  /** 导入时使用的净值 */
+  importNetValue?: number
+  /** 导入净值日期 */
+  importNavDate?: string
+  /** 导入成本金额（由市值-持仓收益反推） */
+  importCostAmount?: number
   loading?: boolean
   selected?: boolean
   /** 是否是加仓（已持有的基金） */
@@ -46,6 +52,11 @@ interface EnhancedHolding extends RecognizedHolding {
   showSearch?: boolean
 }
 const enhancedHoldings = ref<EnhancedHolding[]>([])
+const profitLabelText = computed(() => {
+  if (snapshotProfitLabel.value === 'today') return '今日收益'
+  if (snapshotProfitLabel.value === 'yesterday') return '昨日收益'
+  return '未识别'
+})
 
 // [WHAT] 计算选中数量
 const selectedCount = computed(() => {
@@ -85,11 +96,12 @@ async function startRecognition(file: File) {
   ocrStatus.value = '准备识别...'
   
   try {
-    const holdings = await recognizeHoldings(file, (progress, status) => {
+    const snapshot = await recognizeHoldingSnapshot(file, (progress, status) => {
       ocrProgress.value = Math.round(progress * 100)
       ocrStatus.value = status
     })
-    
+    const holdings = snapshot.holdings
+    snapshotProfitLabel.value = snapshot.profitLabel
     recognizedHoldings.value = holdings
     
     if (holdings.length === 0) {
@@ -143,11 +155,7 @@ async function enhanceHoldings(holdings: RecognizedHolding[]) {
         }
       }
       
-      // [WHAT] 获取当前净值
-      const estimate = await fetchFundEstimate(h.code)
-      if (estimate) {
-        enhancedHoldings.value[index].netValue = parseFloat(estimate.dwjz) || parseFloat(estimate.gsz) || 1
-      }
+      await fillImportData(index)
       
       // [NEW] 检查是否已持有
       enhancedHoldings.value[index].isAddPosition = holdingStore.hasHolding(h.code)
@@ -215,17 +223,66 @@ async function selectSearchResult(index: number, fund: FundInfo) {
   // [WHAT] 检查是否已持有
   holding.isAddPosition = holdingStore.hasHolding(fund.code)
   
-  // [WHAT] 获取净值
-  try {
-    const estimate = await fetchFundEstimate(fund.code)
-    if (estimate) {
-      holding.netValue = parseFloat(estimate.dwjz) || parseFloat(estimate.gsz) || 1
-    }
-  } catch (error) {
-    console.error(`获取基金 ${fund.code} 净值失败:`, error)
-  }
+  await fillImportData(index)
   
   holding.loading = false
+}
+
+function getTodayDate(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function normalizeCostAmount(marketAmount: number, holdingProfit?: number): number {
+  if (typeof holdingProfit !== 'number' || isNaN(holdingProfit)) return marketAmount
+  const cost = marketAmount - holdingProfit
+  if (!isFinite(cost) || cost <= 0) return marketAmount
+  return cost
+}
+
+async function resolveImportNav(code: string): Promise<{ nav: number; navDate: string } | null> {
+  const today = getTodayDate()
+  try {
+    const accurate = await fetchFundAccurateData(code)
+    if (snapshotProfitLabel.value === 'yesterday') {
+      const history = await fetchNetValueHistoryFast(code, 120)
+      const yesterdayNav = history.find(item => item.netValue > 0 && item.date < today)
+      if (yesterdayNav) {
+        return { nav: yesterdayNav.netValue, navDate: yesterdayNav.date }
+      }
+      if (accurate.nav > 0 && accurate.navDate && accurate.navDate < today) {
+        return { nav: accurate.nav, navDate: accurate.navDate }
+      }
+      return null
+    }
+
+    if (accurate.currentValue > 0) {
+      const navDate = accurate.dataSource === 'nav' && accurate.navDate ? accurate.navDate : today
+      return { nav: accurate.currentValue, navDate }
+    }
+    if (accurate.nav > 0 && accurate.navDate) {
+      return { nav: accurate.nav, navDate: accurate.navDate }
+    }
+    return null
+  } catch (error) {
+    console.error(`获取基金 ${code} 导入净值失败:`, error)
+    return null
+  }
+}
+
+async function fillImportData(index: number) {
+  const holding = enhancedHoldings.value[index]
+  if (!holding || !holding.code || holding.amount <= 0) return
+
+  const resolved = await resolveImportNav(holding.code)
+  if (resolved?.nav && resolved.nav > 0) {
+    holding.importNetValue = resolved.nav
+    holding.importNavDate = resolved.navDate
+  }
+  holding.importCostAmount = normalizeCostAmount(holding.amount, holding.holdingProfit)
 }
 
 // [NEW] 手动搜索基金
@@ -302,15 +359,21 @@ async function confirmImport() {
   }
   
   step.value = 'importing'
-  const loading = showLoadingToast({ message: '导入中...', forbidClick: true })
+  showLoadingToast({ message: '导入中...', forbidClick: true })
   
   try {
     let imported = 0
     let addedPosition = 0
     
     for (const h of toImport) {
-      const netValue = h.netValue || 1
-      const shares = h.amount / netValue
+      const marketAmount = h.amount
+      const netValue = h.importNetValue || 1
+      const shares = netValue > 0 ? marketAmount / netValue : 0
+      const costAmount = normalizeCostAmount(marketAmount, h.holdingProfit)
+      const buyNetValue = shares > 0 ? costAmount / shares : netValue
+      if (shares <= 0 || buyNetValue <= 0) {
+        continue
+      }
       
       // [NEW] 检查是否是加仓
       if (h.isAddPosition) {
@@ -318,7 +381,7 @@ async function confirmImport() {
         const existingHolding = holdingStore.getHoldingByCode(h.code)
         if (existingHolding) {
           // [WHAT] 计算新的平均买入净值
-          const totalAmount = existingHolding.amount + h.amount
+          const totalAmount = existingHolding.amount + costAmount
           const totalShares = existingHolding.shares + shares
           const avgNetValue = totalAmount / totalShares
           
@@ -345,10 +408,10 @@ async function confirmImport() {
         code: h.code,
         name: h.name || h.fundInfo?.name || h.code,
         shareClass: detectShareClass(h.code, h.name),
-        amount: h.amount,
-        buyNetValue: netValue,
+        amount: costAmount,
+        buyNetValue: buyNetValue,
         shares: shares,
-        buyDate: new Date().toISOString().split('T')[0],
+        buyDate: h.importNavDate || getTodayDate(),
         holdingDays: 0,
         createdAt: Date.now()
       }
@@ -392,6 +455,7 @@ function closeDialog() {
     selectedImage.value = ''
     ocrProgress.value = 0
     ocrStatus.value = ''
+    snapshotProfitLabel.value = 'unknown'
     recognizedHoldings.value = []
     enhancedHoldings.value = []
   }, 300)
@@ -436,15 +500,10 @@ function formatAmount(amount: number): string {
         <div class="upload-tip">
           <van-icon name="photo-o" size="48" color="var(--color-primary)" />
           <p class="tip-title">选择持仓截图</p>
-          <p class="tip-desc">支持支付宝、天天基金、蛋卷基金等平台的持仓截图</p>
+          <p class="tip-desc">支持支付宝、天天基金、蛋卷基金、京东金融等平台的持仓截图</p>
         </div>
         
         <div class="upload-actions">
-          <label class="upload-btn">
-            <van-icon name="photograph" />
-            <span>拍照</span>
-            <input type="file" accept="image/*" capture="environment" @change="handleFileChange" />
-          </label>
           <label class="upload-btn">
             <van-icon name="photo" />
             <span>相册</span>
@@ -455,7 +514,7 @@ function formatAmount(amount: number): string {
         <div class="usage-tips">
           <p class="tips-title">使用提示</p>
           <ul>
-            <li>支持支付宝、天天基金等平台截图</li>
+            <li>支持支付宝、天天基金、京东金融等平台截图</li>
             <li>没有代码的截图可通过名称自动匹配</li>
             <li>已持有的基金可直接加仓</li>
             <li>识别后可手动修改金额</li>
@@ -477,7 +536,7 @@ function formatAmount(amount: number): string {
       <!-- 预览确认 -->
       <div v-if="step === 'preview'" class="preview-step">
         <div class="preview-header">
-          <span>识别到 {{ enhancedHoldings.length }} 条记录</span>
+          <span>识别到 {{ enhancedHoldings.length }} 条记录（收益列：{{ profitLabelText }}）</span>
           <van-button size="small" plain @click="toggleSelectAll">
             {{ selectedCount === enhancedHoldings.filter(h => h.code && h.amount > 0).length ? '取消全选' : '全选' }}
           </van-button>
@@ -522,6 +581,11 @@ function formatAmount(amount: number): string {
                   <span v-else class="confidence" :style="{ color: getConfidenceColor(holding.confidence) }">
                     置信度 {{ Math.round(holding.confidence * 100) }}%
                   </span>
+                </div>
+                <div class="item-meta">
+                  <span v-if="typeof holding.holdingProfit === 'number'">持仓收益 {{ formatAmount(holding.holdingProfit) }} 元</span>
+                  <span v-if="typeof holding.holdingProfitRate === 'number'"> / 收益率 {{ holding.holdingProfitRate.toFixed(2) }}%</span>
+                  <span v-if="holding.importNetValue"> / 导入净值 {{ holding.importNetValue.toFixed(4) }}（{{ holding.importNavDate || '-' }}）</span>
                 </div>
               </div>
               <div class="item-amount">
@@ -815,6 +879,15 @@ function formatAmount(amount: number): string {
 
 .item-info {
   margin-top: 4px;
+}
+
+.item-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .confidence {
