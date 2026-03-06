@@ -185,14 +185,15 @@ body {
 
 [data-theme="dark"] .van-dialog__cancel.van-button,
 :root:not([data-theme="light"]) .van-dialog__cancel.van-button {
-  background: var(--bg-tertiary) !important;
+  background: #161B22 !important;
   border-color: var(--border-color) !important;
 }
 
 [data-theme="dark"] .van-dialog__confirm.van-button,
 :root:not([data-theme="light"]) .van-dialog__confirm.van-button {
-  background: var(--bg-elevated) !important;
+  background: #161B22 !important;
   border-color: var(--border-strong) !important;
+  color: #FF8787 !important;
 }
 
 .van-cell {

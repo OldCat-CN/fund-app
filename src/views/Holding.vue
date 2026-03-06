@@ -671,24 +671,27 @@ function getTodayProfitClassValue(holding: {
   return holding.todayProfit || 0
 }
 
-function getTodayProfitDateLabel(holding: {
-  valueSource?: 'nav' | 'estimate' | 'fallback'
-  navDate?: string
-}): string {
-  if (isTodayProfitUnavailable(holding)) return '-'
-  if (holding.valueSource === 'estimate') return formatShortDate(todayDate)
-  return formatShortDate(holding.navDate)
-}
+const latestHoldingNavDate = computed(() => {
+  const dated = holdingStore.holdings
+    .map(h => h.navDate || '')
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort((a, b) => (a > b ? -1 : 1))
+  return dated[0] || ''
+})
 
-function getHoldingProfitDateLabel(holding: {
-  valueSource?: 'nav' | 'estimate' | 'fallback'
-  navDate?: string
-}): string {
-  if (holding.valueSource === 'estimate' && isTradingDay() && hasMarketOpenedToday()) {
-    return formatShortDate(todayDate)
-  }
-  return formatShortDate(holding.navDate)
-}
+const todayColumnDateLabel = computed(() => {
+  const hasEstimate = holdingStore.holdings.some(h => h.valueSource === 'estimate')
+  const hasTodayNav = holdingStore.holdings.some(h => h.valueSource === 'nav' && h.navDate === todayDate)
+  if (hasEstimate || hasTodayNav) return formatShortDate(todayDate)
+  if (isTradingDay() && hasMarketOpenedToday()) return '-'
+  return formatShortDate(latestHoldingNavDate.value)
+})
+
+const holdingColumnDateLabel = computed(() => {
+  const hasEstimate = holdingStore.holdings.some(h => h.valueSource === 'estimate')
+  if (hasEstimate && isTradingDay() && hasMarketOpenedToday()) return formatShortDate(todayDate)
+  return formatShortDate(latestHoldingNavDate.value)
+})
 
 function toggleDetail() {
   showDetail.value = !showDetail.value
@@ -750,8 +753,14 @@ function displayMoney(value: number | string | undefined): string {
     <!-- 持仓列表表头 -->
     <div v-if="holdingStore.holdings.length > 0" class="list-header">
       <span class="col-name">基金名称</span>
-      <span class="col-today">当日收益</span>
-      <span class="col-profit">持有收益</span>
+      <span class="col-today">
+        <span>当日收益</span>
+        <span class="header-date">{{ todayColumnDateLabel }}</span>
+      </span>
+      <span class="col-profit">
+        <span>持有收益</span>
+        <span class="header-date">{{ holdingColumnDateLabel }}</span>
+      </span>
     </div>
 
     <!-- 持仓列表 -->
@@ -787,9 +796,6 @@ function displayMoney(value: number | string | undefined): string {
               <div class="profit-rate">
                 {{ getTodayChangeText(holding) }}
               </div>
-              <div class="profit-date">
-                {{ getTodayProfitDateLabel(holding) }}
-              </div>
             </div>
             <div class="col-profit" :class="getChangeStatus(holding.profit || 0)">
               <div class="profit-amount">
@@ -797,9 +803,6 @@ function displayMoney(value: number | string | undefined): string {
               </div>
               <div class="profit-rate">
                 {{ holding.profitRate !== undefined ? formatPercent(holding.profitRate) : '--' }}
-              </div>
-              <div class="profit-date">
-                {{ getHoldingProfitDateLabel(holding) }}
               </div>
             </div>
           </div>
@@ -1300,10 +1303,18 @@ function displayMoney(value: number | string | undefined): string {
   align-items: center;
   justify-content: center;
   line-height: 1;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .list-header .col-name {
   justify-content: flex-start;
+  flex-direction: row;
+}
+
+.list-header .header-date {
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 /* 持仓列表 */
@@ -1498,13 +1509,6 @@ function displayMoney(value: number | string | undefined): string {
 .col-profit .profit-rate {
   font-size: 12px;
   opacity: 0.8;
-}
-
-.col-today .profit-date,
-.col-profit .profit-date {
-  margin-top: 3px;
-  font-size: 10px;
-  color: var(--text-muted);
 }
 
 .col-today.up .profit-amount,
