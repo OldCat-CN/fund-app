@@ -3,7 +3,7 @@
 // [WHAT] 显示持仓列表、汇总统计，支持添加/编辑/删除持仓
 // [WHAT] 支持 A类/C类基金费用计算
 
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useHoldingStore } from '@/stores/holding'
 import { searchFund, detectShareClass } from '@/api/fund'
@@ -129,6 +129,7 @@ const pendingOnlyItems = computed(() => {
   return Array.from(grouped.values()).sort((a, b) => b.latestCreatedAt - a.latestCreatedAt)
 })
 const hasHoldingListItems = computed(() => holdingStore.holdings.length > 0 || pendingOnlyItems.value.length > 0)
+const pendingOnlyDayChangeMap = ref<Record<string, number>>({})
 const pendingTradeItems = computed(() => {
   const list = activePendingTradeCode.value
     ? holdingStore.pendingTrades.filter(t => t.code === activePendingTradeCode.value)
@@ -789,6 +790,43 @@ function openPendingTradesDialog(code = '', name = '') {
   activePendingTradeName.value = name
   showPendingTradesDialog.value = true
 }
+
+watch(
+  pendingOnlyItems,
+  async (items) => {
+    const codes = items.map(item => item.code)
+    if (!codes.length) {
+      pendingOnlyDayChangeMap.value = {}
+      return
+    }
+    const nextMap: Record<string, number> = {}
+    await Promise.all(
+      codes.map(async (code) => {
+        const data = await fetchFundAccurateData(code).catch(() => null)
+        if (data && typeof data.dayChange === 'number' && !Number.isNaN(data.dayChange)) {
+          nextMap[code] = data.dayChange
+        }
+      })
+    )
+    pendingOnlyDayChangeMap.value = nextMap
+  },
+  { immediate: true }
+)
+
+function getPendingOnlyDayChangeText(code: string): string {
+  const value = pendingOnlyDayChangeMap.value[code]
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return formatPercent(value)
+}
+
+function handleSellClick(code: string, name = '') {
+  const holding = holdingStore.getHoldingByCode(code)
+  if (!holding) {
+    showToast(`${name || '该基金'}暂无持仓，不能卖出`)
+    return
+  }
+  openTradeDialog('sell', code)
+}
 </script>
 
 <template>
@@ -930,10 +968,16 @@ function openPendingTradesDialog(code = '', name = '') {
             >
               待确认交易{{ pendingItem.count }}笔
             </div>
+            <div class="trade-actions" @click.stop>
+              <van-button class="trade-btn buy" size="mini" type="danger" plain @click="openTradeDialog('buy', pendingItem.code)">买入</van-button>
+              <van-button class="trade-btn sell" size="mini" type="success" plain @click="handleSellClick(pendingItem.code, pendingItem.name)">卖出</van-button>
+              <van-button class="trade-btn delete" size="mini" type="danger" plain @click="handleDelete(pendingItem.code)">删除</van-button>
+              <van-button class="trade-btn history" size="mini" type="primary" plain @click="openPendingTradesDialog(pendingItem.code, pendingItem.name)">交易记录</van-button>
+            </div>
           </div>
           <div class="col-today flat">
             <div class="profit-amount">-</div>
-            <div class="profit-rate">-</div>
+            <div class="profit-rate">{{ getPendingOnlyDayChangeText(pendingItem.code) }}</div>
           </div>
           <div class="col-profit flat">
             <div class="profit-amount">-</div>
