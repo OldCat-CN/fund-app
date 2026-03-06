@@ -99,8 +99,46 @@ const summaryTodayClass = computed(() => {
 
 const pendingTradeCount = computed(() => holdingStore.pendingTrades.length)
 const showPendingTradesDialog = ref(false)
+const activePendingTradeCode = ref('')
+const activePendingTradeName = ref('')
+const pendingCountByCode = computed(() => {
+  const map = new Map<string, number>()
+  holdingStore.pendingTrades.forEach((trade) => {
+    map.set(trade.code, (map.get(trade.code) || 0) + 1)
+  })
+  return map
+})
+const pendingOnlyItems = computed(() => {
+  const holdingCodes = new Set(holdingStore.holdings.map(h => h.code))
+  const grouped = new Map<string, { code: string; name: string; count: number; latestCreatedAt: number }>()
+  holdingStore.pendingTrades.forEach((trade) => {
+    if (holdingCodes.has(trade.code)) return
+    const existing = grouped.get(trade.code)
+    if (existing) {
+      existing.count += 1
+      if (trade.createdAt > existing.latestCreatedAt) existing.latestCreatedAt = trade.createdAt
+    } else {
+      grouped.set(trade.code, {
+        code: trade.code,
+        name: trade.name || trade.code,
+        count: 1,
+        latestCreatedAt: trade.createdAt
+      })
+    }
+  })
+  return Array.from(grouped.values()).sort((a, b) => b.latestCreatedAt - a.latestCreatedAt)
+})
+const hasHoldingListItems = computed(() => holdingStore.holdings.length > 0 || pendingOnlyItems.value.length > 0)
 const pendingTradeItems = computed(() => {
-  return [...holdingStore.pendingTrades].sort((a, b) => b.createdAt - a.createdAt)
+  const list = activePendingTradeCode.value
+    ? holdingStore.pendingTrades.filter(t => t.code === activePendingTradeCode.value)
+    : holdingStore.pendingTrades
+  return [...list].sort((a, b) => b.createdAt - a.createdAt)
+})
+const pendingDialogTitle = computed(() => {
+  return activePendingTradeCode.value
+    ? `${activePendingTradeName.value || activePendingTradeCode.value} 待确认交易`
+    : '待确认交易'
 })
 const tradeHistorySummary = computed(() => {
   if (!historyFundCode.value) {
@@ -741,6 +779,16 @@ async function cancelPendingTrade(id: string) {
     // 用户取消
   }
 }
+
+function getPendingTradeCountByCode(code: string): number {
+  return pendingCountByCode.value.get(code) || 0
+}
+
+function openPendingTradesDialog(code = '', name = '') {
+  activePendingTradeCode.value = code
+  activePendingTradeName.value = name
+  showPendingTradesDialog.value = true
+}
 </script>
 
 <template>
@@ -784,13 +832,13 @@ async function cancelPendingTrade(id: string) {
           </div>
         </div>
       </div>
-      <div v-if="pendingTradeCount > 0" class="pending-tip" @click="showPendingTradesDialog = true">
+      <div v-if="pendingTradeCount > 0" class="pending-tip" @click="openPendingTradesDialog()">
         待确认交易 {{ pendingTradeCount }} 笔（基金公司公布当日净值后自动生效）
       </div>
     </div>
 
     <!-- 持仓列表表头 -->
-    <div v-if="holdingStore.holdings.length > 0" class="list-header">
+    <div v-if="hasHoldingListItems" class="list-header">
       <span class="col-name">基金名称</span>
       <span class="col-today">
         <span>当日收益</span>
@@ -808,7 +856,7 @@ async function cancelPendingTrade(id: string) {
       @refresh="onRefresh"
       class="holding-list-container"
     >
-      <template v-if="holdingStore.holdings.length > 0">
+      <template v-if="hasHoldingListItems">
         <van-swipe-cell v-for="holding in holdingStore.holdings" :key="holding.code">
           <div class="holding-item" :class="getHoldingItemBgClass(holding.todayProfit)" @click="goToDetail(holding.code)">
             <div class="col-name">
@@ -820,6 +868,13 @@ async function cancelPendingTrade(id: string) {
                 <span v-else-if="holding.currentValue && holding.currentValue > 0" class="tag updated">{{ getHoldingUpdateLabel(holding) }}</span>
                 <span v-else class="tag pending">待更新</span>
                 <span class="amount">¥{{ displayMoney(holding.marketValue || holding.amount) }}</span>
+              </div>
+              <div
+                v-if="getPendingTradeCountByCode(holding.code) > 0"
+                class="pending-inline-tip"
+                @click.stop="openPendingTradesDialog(holding.code, holding.name)"
+              >
+                待确认交易{{ getPendingTradeCountByCode(holding.code) }}笔
               </div>
               <div class="trade-actions" @click.stop>
                 <van-button class="trade-btn buy" size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
@@ -856,6 +911,35 @@ async function cancelPendingTrade(id: string) {
             />
           </template>
         </van-swipe-cell>
+
+        <div
+          v-for="pendingItem in pendingOnlyItems"
+          :key="`pending_only_${pendingItem.code}`"
+          class="holding-item holding-bg-flat pending-only-item"
+        >
+          <div class="col-name">
+            <div class="fund-name">{{ pendingItem.name }}</div>
+            <div class="fund-code">{{ pendingItem.code }}</div>
+            <div class="fund-meta">
+              <span class="tag pending">待更新</span>
+              <span class="amount">--</span>
+            </div>
+            <div
+              class="pending-inline-tip"
+              @click.stop="openPendingTradesDialog(pendingItem.code, pendingItem.name)"
+            >
+              待确认交易{{ pendingItem.count }}笔
+            </div>
+          </div>
+          <div class="col-today flat">
+            <div class="profit-amount">-</div>
+            <div class="profit-rate">-</div>
+          </div>
+          <div class="col-profit flat">
+            <div class="profit-amount">-</div>
+            <div class="profit-rate">-</div>
+          </div>
+        </div>
 
         <div class="add-holding-wrap">
           <van-button round type="primary" block @click="openAddDialog">
@@ -1226,7 +1310,7 @@ async function cancelPendingTrade(id: string) {
     >
       <div class="trade-history-dialog">
         <div class="dialog-header">
-          <span>待确认交易</span>
+          <span>{{ pendingDialogTitle }}</span>
           <van-icon name="cross" @click="showPendingTradesDialog = false" />
         </div>
         <div class="dialog-content">
@@ -1350,6 +1434,13 @@ async function cancelPendingTrade(id: string) {
   color: var(--text-secondary);
   position: relative;
   z-index: 1;
+  cursor: pointer;
+}
+
+.pending-inline-tip {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
   cursor: pointer;
 }
 
