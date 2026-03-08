@@ -468,7 +468,8 @@ function cleanFundName(name: string): string {
   return name
     .replace(/持有|金额|收益|份额|净值|估值/g, '')
     .replace(/[¥￥%]/g, '')
-    .replace(/[为儿]$/g, '')
+    // [WHY] OCR 常见尾部噪声字符（如“本/色/办/攻/汪/X”）
+    .replace(/[为儿本色办攻汪Xx]$/g, '')
     .trim()
 }
 
@@ -478,9 +479,12 @@ function containsFundKeyword(name: string): boolean {
 
 function looksLikeFundName(name: string): boolean {
   if (!name || name.length < 4) return false
+  const chineseCount = (name.match(/[\u4e00-\u9fa5]/g) || []).length
+  // [WHY] 过滤“KmBEERAC本”这类英文噪声，至少要有一定中文信息
+  if (chineseCount < 2) return false
   if (containsFundKeyword(name)) return true
-  // [EDGE] 某些名称关键词缺失时，至少要求较长字符长度
-  return name.length >= 8
+  // [EDGE] 某些名称关键词缺失时，要求中文字符更充分
+  return chineseCount >= 4 && name.length >= 8
 }
 
 function stripNameNoiseSuffix(text: string): string {
