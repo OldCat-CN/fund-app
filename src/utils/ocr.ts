@@ -3,6 +3,7 @@
 // [DEPS] 依赖 tesseract.js 库
 
 import Tesseract from 'tesseract.js'
+import workerPath from 'tesseract.js/dist/worker.min.js?url'
 import type { Worker, LoggerMessage } from 'tesseract.js'
 
 /**
@@ -115,15 +116,20 @@ async function getSharedWorker(): Promise<Worker> {
   if (!sharedWorkerPromise) {
     debugOcrStage('Stage 0 OCR资源配置', {
       langs: 'chi_sim+eng',
+      workerPath,
       langPath: OCR_LANG_PATH,
       cachePath: OCR_CACHE_PATH,
       gzip: true
     })
     sharedWorkerPromise = Tesseract.createWorker('chi_sim+eng', undefined, {
       logger: emitProgress,
+      workerPath,
       langPath: OCR_LANG_PATH,
       cachePath: OCR_CACHE_PATH,
       gzip: true
+    }).catch((error) => {
+      sharedWorkerPromise = null
+      throw error
     })
   }
   return sharedWorkerPromise

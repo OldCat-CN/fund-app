@@ -124,7 +124,9 @@ watch(
       .then(() => {
         ocrEngineReady.value = true
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        console.error('OCR预加载失败:', error)
+      })
       .finally(() => {
         preloadingEngine.value = false
       })
