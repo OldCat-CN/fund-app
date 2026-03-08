@@ -41,6 +41,12 @@ export interface RecognizedHoldingSnapshot {
   rawText: string
 }
 
+const FUND_KEYWORDS = [
+  '混合', 'ETF', '联接', '指数', '债券', '股票', '增强', 'LOF', 'QDII', '主题', '精选', '成长', '价值', '量化',
+  '稳健', '纯债', '短债', '定开', '创新', '科技', '消费', '医药', '新能源', '半导体', '智选', '优选', '龙头',
+  '增利', '发起'
+]
+
 /**
  * OCR 识别进度回调
  */
@@ -138,7 +144,7 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
   // [WHAT] 始终尝试支付宝格式解析，补足“名称+金额分行”的场景
   const alipayHoldings = parseAlipayFormat(lines)
   for (const ah of alipayHoldings) {
-    const exists = holdings.some(h => {
+    const existingIndex = holdings.findIndex(h => {
       const sameCode = !!h.code && !!ah.code && h.code === ah.code
       const sameAmount = Math.abs((h.amount || 0) - (ah.amount || 0)) <= 0.01
       const hasEnoughNameInfo = !!h.name && !!ah.name && h.name.length >= 4 && ah.name.length >= 4
@@ -149,7 +155,29 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
       )
       return sameCode || (sameAmount && sameName)
     })
-    if (!exists) holdings.push(ah)
+    if (existingIndex === -1) {
+      holdings.push(ah)
+      continue
+    }
+
+    // [WHY] 同金额同标的时，优先保留更完整的基金名称（处理跨行名称被截断）
+    const existing = holdings[existingIndex]
+    const shouldUpgradeName =
+      ah.name.length > existing.name.length &&
+      (
+        existing.name.length < 6 ||
+        ah.name.includes(existing.name) ||
+        existing.name.includes(ah.name.slice(0, 4))
+      )
+    if (shouldUpgradeName) {
+      holdings[existingIndex] = {
+        ...existing,
+        name: ah.name,
+        confidence: Math.max(existing.confidence, ah.confidence),
+        holdingProfit: ah.holdingProfit ?? existing.holdingProfit,
+        holdingProfitRate: ah.holdingProfitRate ?? existing.holdingProfitRate
+      }
+    }
   }
 
   // [WHAT] 过滤明显噪音结果
@@ -157,6 +185,8 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
     if (h.amount < 10) return false
     if (!h.code && (!h.name || h.name.length < 3)) return false
     if (!h.code && /^(ETF|基金|持仓)$/i.test(h.name.trim())) return false
+    // [WHY] 过滤“半导体/易方达”这类短名称误识别
+    if (!h.code && h.name.length <= 4 && !containsFundKeyword(h.name)) return false
     return true
   })
 }
@@ -260,11 +290,14 @@ function parseSingleLine(line: string): RecognizedHolding | null {
   const pattern4 = /([A-Za-z\u4e00-\u9fa5][A-Za-z0-9\u4e00-\u9fa5]{2,})\s*.*?[¥￥]?\s*([\d,]+\.?\d{2})/
   const match4 = line.match(pattern4)
   if (match4 && parseAmount(match4[2]) >= 100) { // 金额至少100元
+    const parsedName = cleanFundName(match4[1])
+    // [WHY] 避免把“易方达/半导体”等短片段误判为完整基金名称
+    if (!looksLikeFundName(parsedName)) return null
     // [WHAT] 尝试从名称中提取基金代码
     const codeMatch = line.match(/\d{6}/)
     return {
       code: codeMatch ? codeMatch[0] : '',
-      name: cleanFundName(match4[1]),
+      name: parsedName,
       amount: parseAmount(match4[2]),
       confidence: codeMatch ? 0.6 : 0.5,
       needsCodeMatch: !codeMatch // [NEW] 标记需要手动匹配代码
@@ -281,9 +314,6 @@ function parseSingleLine(line: string): RecognizedHolding | null {
  */
 function parseAlipayFormat(lines: string[]): RecognizedHolding[] {
   const holdings: RecognizedHolding[] = []
-  
-  // [WHAT] 支付宝常见的基金名称关键词
-  const fundKeywords = ['混合', 'ETF', '联接', '指数', '债券', '股票', '增强', 'LOF', 'QDII', '主题', '精选', '成长', '价值', '量化', '稳健', '纯债', '短债', '定开', '创新', '科技', '消费', '医药', '新能源', '半导体', '智选', '优选', '龙头', '增利']
   
   // [WHAT] 需要排除的非基金名称关键词
   const excludeKeywords = ['持有', '收益', '金额', '份额', '净值', '估值', '日收益', '持有收益', '累计收益', '我的', '全部', '偏股', '偏债', '黄金', '排序', '名称', '添加', '管理']
@@ -309,24 +339,28 @@ function parseAlipayFormat(lines: string[]): RecognizedHolding[] {
         .replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '')
     )
 
-    const hasKeyword = fundKeywords.some(kw => nameCandidate.includes(kw))
+    const hasKeyword = containsFundKeyword(nameCandidate)
     const shouldAppendNextLine =
       !hasKeyword ||
       nameCandidate.length < 6 ||
-      /(联|接|起|式)$/.test(nameCandidate)
+      /(联|接|起|式|主题)$/.test(nameCandidate)
     if (shouldAppendNextLine && nextLine) {
-      const nextNamePart = cleanFundName(
+      const nextNamePartRaw = cleanFundName(
         nextLine
           .replace(/\d[\d,\.]*\.\d{2}/g, '')
           .replace(/[+\-]\d[\d,\.]*\.\d{2}%?/g, '')
           .replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '')
       )
-      nameCandidate = `${nameCandidate}${nextNamePart}`
+      const nextNamePart = stripNameNoiseSuffix(nextNamePartRaw)
+      if (shouldJoinNameContinuation(nameCandidate, nextNamePart)) {
+        nameCandidate = `${nameCandidate}${nextNamePart}`
+      }
     }
 
-    const isFundName = fundKeywords.some(kw => nameCandidate.includes(kw))
+    const isFundName = containsFundKeyword(nameCandidate)
     const isExcluded = excludeKeywords.some(kw => nameCandidate.includes(kw)) && !isFundName
     if (!nameCandidate || nameCandidate.length < 3 || isExcluded) continue
+    if (!looksLikeFundName(nameCandidate)) continue
 
     const exists = holdings.some(h => h.name === nameCandidate || Math.abs(h.amount - amount) <= 0.01)
     if (!exists) {
@@ -439,6 +473,41 @@ function cleanFundName(name: string): string {
     .replace(/[¥￥%]/g, '')
     .replace(/[为儿]$/g, '')
     .trim()
+}
+
+function containsFundKeyword(name: string): boolean {
+  return FUND_KEYWORDS.some(kw => name.includes(kw))
+}
+
+function looksLikeFundName(name: string): boolean {
+  if (!name || name.length < 4) return false
+  if (containsFundKeyword(name)) return true
+  // [EDGE] 某些名称关键词缺失时，至少要求较长字符长度
+  return name.length >= 8
+}
+
+function stripNameNoiseSuffix(text: string): string {
+  if (!text) return ''
+  const noiseTokens = ['预计', '更新', '今日', '昨日', '自选', '热搜', '榜', 'No', 'NO']
+  let cropped = text
+  for (const token of noiseTokens) {
+    const idx = cropped.indexOf(token)
+    if (idx > 0) {
+      cropped = cropped.slice(0, idx)
+      break
+    }
+  }
+  return cropped.trim()
+}
+
+function shouldJoinNameContinuation(current: string, nextPart: string): boolean {
+  if (!current || !nextPart) return false
+  if (nextPart.length > 18) return false
+  if (/(今日|昨日|自选|热搜|榜|建议|关注|加仓)/.test(nextPart)) return false
+  // [WHY] 常见跨行：第一行到“主题/联/接”，第二行补“ETF联接C”
+  if (/^(ETF|联接|混合|指数|债券|股票|QDII|LOF|发起|A|C|E)/i.test(nextPart)) return true
+  if (containsFundKeyword(nextPart)) return true
+  return /(联|接|起|式|主题)$/.test(current)
 }
 
 /**
