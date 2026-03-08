@@ -411,19 +411,38 @@ export async function searchFund(
   // [WHAT] 检查是否是板块名称
   const mappedKeywords = sectorKeywords[kw]
   
-  // [WHAT] 先尝试完整匹配
-  let results = list.filter(
-    (item) =>
-      item.code.includes(kw) ||
-      item.name.toLowerCase().includes(kw) ||
-      item.pinyin.toLowerCase().includes(kw)
-  )
+  // [WHAT] 先尝试完整匹配，并记录匹配得分用于排序
+  const scoreMap = new Map<string, number>()
+  let results = list.filter((item) => {
+    const code = item.code.toLowerCase()
+    const name = item.name.toLowerCase()
+    const pinyin = item.pinyin.toLowerCase()
+    let score = 0
+    if (code === kw) score = Math.max(score, 120)
+    else if (code.startsWith(kw)) score = Math.max(score, 110)
+    else if (code.includes(kw)) score = Math.max(score, 90)
+    if (name === kw) score = Math.max(score, 100)
+    else if (name.startsWith(kw)) score = Math.max(score, 95)
+    else if (name.includes(kw)) score = Math.max(score, 85)
+    if (pinyin.startsWith(kw)) score = Math.max(score, 70)
+    else if (pinyin.includes(kw)) score = Math.max(score, 60)
+    if (score > 0) {
+      scoreMap.set(item.code, score)
+      return true
+    }
+    return false
+  })
   
   // [WHY] 如果是板块名称，用关键词补充搜索结果
   if (mappedKeywords) {
     const keywordResults = list.filter((item) => {
       const name = item.name.toLowerCase()
-      return mappedKeywords.some(k => name.includes(k.toLowerCase()))
+      const matchedCount = mappedKeywords.filter(k => name.includes(k.toLowerCase())).length
+      if (matchedCount > 0) {
+        scoreMap.set(item.code, Math.max(scoreMap.get(item.code) || 0, 40 + Math.min(20, matchedCount * 5)))
+        return true
+      }
+      return false
     })
     // [WHAT] 合并结果，去重
     const existingCodes = new Set(results.map(r => r.code))
@@ -435,14 +454,19 @@ export async function searchFund(
     })
   }
   
-  // [WHY] 如果结果还是很少，尝试拆分关键词匹配
+  // [WHY] 如果结果偏少，补充“严格模糊匹配”（仅补充真正相关项）
   if (results.length < 10 && kw.length >= 2 && !mappedKeywords) {
     const chars = kw.split('')
     const charResults = list.filter((item) => {
       const name = item.name.toLowerCase()
-      // [HOW] 匹配包含任意一个字符的基金（至少匹配2个字符）
       const matchCount = chars.filter(c => name.includes(c)).length
-      return matchCount >= Math.min(2, chars.length)
+      const ratio = matchCount / chars.length
+      // [WHAT] 只接受高相似度模糊匹配，避免“按代码顺序灌入大量无关项”
+      const pass = ratio >= 0.75 && (name.includes(chars[0] || '') || name.includes(chars[1] || ''))
+      if (pass) {
+        scoreMap.set(item.code, Math.max(scoreMap.get(item.code) || 0, 50 + Math.round(ratio * 30)))
+      }
+      return pass
     })
     // [WHAT] 合并结果，去重
     const existingCodes = new Set(results.map(r => r.code))
@@ -454,6 +478,14 @@ export async function searchFund(
     })
   }
   
+  // [WHAT] 按匹配得分排序，只展示“匹配中的”结果
+  results.sort((a, b) => {
+    const sa = scoreMap.get(a.code) || 0
+    const sb = scoreMap.get(b.code) || 0
+    if (sb !== sa) return sb - sa
+    return a.code.localeCompare(b.code)
+  })
+
   return results.slice(0, limit)
 }
 
