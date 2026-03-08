@@ -47,6 +47,11 @@ const FUND_KEYWORDS = [
   '增利', '发起'
 ]
 
+// [WHY] OCR 常见错字修正（基于真实基金库回归样本）
+const KNOWN_NAME_CORRECTIONS: Array<[RegExp, string]> = [
+  [/永赢守信混合C$/g, '永赢睿信混合C']
+]
+
 /**
  * OCR 识别进度回调
  */
@@ -465,12 +470,22 @@ function isValidFundCode(code: string): boolean {
  * [WHY] 去除名称中的噪音字符
  */
 function cleanFundName(name: string): string {
-  return name
+  const cleaned = name
     .replace(/持有|金额|收益|份额|净值|估值/g, '')
     .replace(/[¥￥%]/g, '')
     // [WHY] OCR 常见尾部噪声字符（如“本/色/办/攻/汪/X”）
     .replace(/[为儿本色办攻汪Xx]$/g, '')
     .trim()
+
+  return applyKnownNameCorrections(cleaned)
+}
+
+function applyKnownNameCorrections(name: string): string {
+  let normalized = name
+  for (const [pattern, replacement] of KNOWN_NAME_CORRECTIONS) {
+    normalized = normalized.replace(pattern, replacement)
+  }
+  return normalized
 }
 
 function containsFundKeyword(name: string): boolean {
