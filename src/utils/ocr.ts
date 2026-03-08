@@ -65,6 +65,8 @@ let sharedWorkerPromise: Promise<Worker> | null = null
 let activeProgressCallback: OcrProgressCallback | undefined
 
 const OCR_DEBUG_PREFIX = '[OCR 调试]'
+const OCR_LANG_PATH = 'https://tessdata.projectnaptha.com/4.0.0_best'
+const OCR_CACHE_PATH = 'ocr-cache/projectnaptha-4.0.0-best-v1'
 
 function debugOcrStage(stage: string, payload?: unknown) {
   const label = `${OCR_DEBUG_PREFIX}[${stage}]`
@@ -111,8 +113,17 @@ function emitProgress(message: LoggerMessage) {
 
 async function getSharedWorker(): Promise<Worker> {
   if (!sharedWorkerPromise) {
+    debugOcrStage('Stage 0 OCR资源配置', {
+      langs: 'chi_sim+eng',
+      langPath: OCR_LANG_PATH,
+      cachePath: OCR_CACHE_PATH,
+      gzip: true
+    })
     sharedWorkerPromise = Tesseract.createWorker('chi_sim+eng', undefined, {
-      logger: emitProgress
+      logger: emitProgress,
+      langPath: OCR_LANG_PATH,
+      cachePath: OCR_CACHE_PATH,
+      gzip: true
     })
   }
   return sharedWorkerPromise
