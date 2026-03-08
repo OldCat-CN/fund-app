@@ -3,7 +3,6 @@
 // [DEPS] 依赖 tesseract.js 库
 
 import Tesseract from 'tesseract.js'
-import workerPath from 'tesseract.js/dist/worker.min.js?url'
 import type { Worker, LoggerMessage } from 'tesseract.js'
 
 /**
@@ -68,6 +67,8 @@ let activeProgressCallback: OcrProgressCallback | undefined
 const OCR_DEBUG_PREFIX = '[OCR 调试]'
 const OCR_LANG_PATH = 'https://tessdata.projectnaptha.com/4.0.0_best'
 const OCR_CACHE_PATH = 'ocr-cache/projectnaptha-4.0.0-best-v1'
+const OCR_WORKER_PATH = typeof window !== 'undefined' ? '/tesseract/worker.min.js' : undefined
+const OCR_CORE_PATH = typeof window !== 'undefined' ? '/tesseract-core' : undefined
 
 function debugOcrStage(stage: string, payload?: unknown) {
   const label = `${OCR_DEBUG_PREFIX}[${stage}]`
@@ -116,18 +117,21 @@ async function getSharedWorker(): Promise<Worker> {
   if (!sharedWorkerPromise) {
     debugOcrStage('Stage 0 OCR资源配置', {
       langs: 'chi_sim+eng',
-      workerPath,
+      workerPath: OCR_WORKER_PATH || '(default)',
+      corePath: OCR_CORE_PATH || '(default)',
       langPath: OCR_LANG_PATH,
       cachePath: OCR_CACHE_PATH,
       gzip: true
     })
-    sharedWorkerPromise = Tesseract.createWorker('chi_sim+eng', undefined, {
+    const workerOptions = {
       logger: emitProgress,
-      workerPath,
       langPath: OCR_LANG_PATH,
       cachePath: OCR_CACHE_PATH,
-      gzip: true
-    }).catch((error) => {
+      gzip: true,
+      ...(OCR_WORKER_PATH ? { workerPath: OCR_WORKER_PATH } : {}),
+      ...(OCR_CORE_PATH ? { corePath: OCR_CORE_PATH } : {})
+    }
+    sharedWorkerPromise = Tesseract.createWorker('chi_sim+eng', undefined, workerOptions).catch((error) => {
       sharedWorkerPromise = null
       throw error
     })
