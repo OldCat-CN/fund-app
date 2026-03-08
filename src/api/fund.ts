@@ -25,6 +25,27 @@ let fundListCache: FundInfo[] | null = null
 const FUND_LIST_STORAGE_KEY = 'fund_list_cache_v1'
 const FUND_LIST_STORAGE_TIME_KEY = 'fund_list_cache_time_v1'
 
+function isOffMarketFund(item: FundInfo): boolean {
+  const code = (item.code || '').trim()
+  const name = (item.name || '').trim()
+
+  // [WHY] 过滤典型场内交易基金代码（ETF/LOF 交易代码）
+  if (/^5\d{5}$/.test(code)) return false
+  if (/^15\d{4}$/.test(code)) return false
+  if (/^16\d{4}$/.test(code)) return false
+
+  // [WHY] 过滤场内 ETF 名称，仅保留“ETF联接/ETF-FOF”等场外产品
+  const hasEtf = /ETF/i.test(name)
+  const isOffMarketEtf = /联接|ETF-FOF/i.test(name)
+  if (hasEtf && !isOffMarketEtf) return false
+
+  return true
+}
+
+function filterOffMarketFunds(list: FundInfo[]): FundInfo[] {
+  return list.filter(isOffMarketFund)
+}
+
 // [WHY] 天天基金接口使用固定的 jsonpgz 回调函数名，需要用队列处理并发请求
 interface PendingRequest {
   code: string
@@ -138,7 +159,7 @@ export async function fetchFundList(): Promise<FundInfo[]> {
   // [WHAT] 优先读取本地缓存（手动更新后可立即生效）
   const cached = loadFundListFromStorage()
   if (cached.length > 0) {
-    fundListCache = cached
+    fundListCache = filterOffMarketFunds(cached)
     return fundListCache
   }
 
@@ -157,7 +178,7 @@ export async function fetchFundList(): Promise<FundInfo[]> {
       
       const data = await response.json()
       if (Array.isArray(data) && data.length > 0) {
-        fundListCache = data as FundInfo[]
+        fundListCache = filterOffMarketFunds(data as FundInfo[])
         console.log(`[Fund API] 加载基金列表成功 (${path}): ${fundListCache.length} 只`)
         return fundListCache
       }
@@ -209,9 +230,10 @@ export function getFundListCacheUpdateTime(): number | null {
  */
 export async function updateFundListCache(): Promise<number> {
   const list = await fetchFundListFromRemote()
-  saveFundListToStorage(list)
-  fundListCache = list
-  return list.length
+  const offMarketList = filterOffMarketFunds(list)
+  saveFundListToStorage(offMarketList)
+  fundListCache = offMarketList
+  return offMarketList.length
 }
 
 /**
@@ -252,8 +274,9 @@ async function fetchFundListFromRemote(): Promise<FundInfo[]> {
         name: item[2] || '',
         type: item[3] || ''
       }))
-      fundListCache = list
-      resolve(list)
+      const offMarketList = filterOffMarketFunds(list)
+      fundListCache = offMarketList
+      resolve(offMarketList)
     }
     script.onerror = () => {
       cleanup()

@@ -14,6 +14,18 @@ const repoRoot = path.resolve(__dirname, '..')
 const outputPath = path.join(repoRoot, 'public', 'fund-list.json')
 const sourceUrl = `https://fund.eastmoney.com/js/fundcode_search.js?rt=${Date.now()}`
 
+function isOffMarketFund(item) {
+  const code = (item.code || '').trim()
+  const name = (item.name || '').trim()
+  if (/^5\d{5}$/.test(code)) return false
+  if (/^15\d{4}$/.test(code)) return false
+  if (/^16\d{4}$/.test(code)) return false
+  const hasEtf = /ETF/i.test(name)
+  const isOffMarketEtf = /联接|ETF-FOF/i.test(name)
+  if (hasEtf && !isOffMarketEtf) return false
+  return true
+}
+
 function parseFundList(raw) {
   const normalized = raw.replace(/^\uFEFF/, '')
   const match = normalized.match(/var\s+r\s*=\s*(\[[\s\S]*\]);?$/)
@@ -21,13 +33,14 @@ function parseFundList(raw) {
     throw new Error('无法解析 fundcode_search.js: 未找到变量 r')
   }
   const arr = JSON.parse(match[1])
-  return arr.map((item) => ({
+  const list = arr.map((item) => ({
     code: item[0] || '',
     pinyin: item[1] || '',
     name: item[2] || '',
     type: item[3] || '',
     fullPinyin: item[4] || ''
   }))
+  return list.filter(isOffMarketFund)
 }
 
 async function main() {
