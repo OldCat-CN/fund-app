@@ -266,6 +266,10 @@ async function enhanceHoldings(holdings: RecognizedHolding[], shareClassHints: b
       h.selected = false
       h.showSearch = true
       h.searchKeyword = stripShareClassSuffix(h.name)
+      // [FIX] 自动填入关键词后立即触发首次搜索，避免空结果占位误导
+      if (h.searchKeyword) {
+        manualSearch(index, h.searchKeyword)
+      }
     }
   })
   
@@ -372,6 +376,10 @@ async function selectSearchResult(index: number, fund: FundInfo) {
   holding.selected = !!holding.hasShareClassHint
   // [WHY] 未勾选项默认展开修改栏，便于用户确认份额类型
   holding.showSearch = !holding.selected
+  // [FIX] 展开修改栏时自动触发一次搜索，避免用户必须手动改字才出结果
+  if (holding.showSearch && holding.searchKeyword) {
+    manualSearch(index, holding.searchKeyword)
+  }
   
   // [WHAT] 检查是否已持有
   holding.isAddPosition = holdingStore.hasHolding(fund.code)
