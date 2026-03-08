@@ -878,6 +878,7 @@ function handleWrapperShowUpdate(value: boolean) {
 /* 识别中 */
 .recognizing-step {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 16px;
@@ -885,7 +886,9 @@ function handleWrapperShowUpdate(value: boolean) {
 
 .preview-image {
   flex: 1;
+  min-height: 0;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   border-radius: 12px;
   background: var(--bg-primary);
   padding: 8px;
