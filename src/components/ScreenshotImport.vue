@@ -162,6 +162,11 @@ function hasShareClassType(name?: string): boolean {
   return /[A-C]$/i.test(name.trim())
 }
 
+function stripShareClassSuffix(name?: string): string {
+  if (!name) return ''
+  return name.trim().replace(/[A-C]$/i, '').trim()
+}
+
 async function getFundNameMap(): Promise<Map<string, FundInfo>> {
   if (fundNameMapCache) return fundNameMapCache
   const list = await fetchFundList()
@@ -202,6 +207,7 @@ async function correctHoldingNames(holdings: RecognizedHolding[]): Promise<Recog
   return holdings.map((h) => {
     if (!h.name || h.code) return h
     const normalized = h.name.replace(/\s+/g, '')
+    const hasShareHint = hasShareClassType(normalized)
     if (fundMap.has(normalized)) {
       const exact = fundMap.get(normalized)!
       return { ...h, name: exact.name, code: exact.code, needsCodeMatch: false, confidence: Math.max(h.confidence, 0.8) }
@@ -211,7 +217,14 @@ async function correctHoldingNames(holdings: RecognizedHolding[]): Promise<Recog
     for (const name of names) {
       if (Math.abs(name.length - normalized.length) > 8) continue
       if (normalized[0] && name[0] && normalized[0] !== name[0]) continue
-      const score = quickSimilarity(normalized, name)
+      let score = quickSimilarity(normalized, name)
+      if (!hasShareHint) {
+        const normalizedBase = stripShareClassSuffix(normalized)
+        const candidateBase = stripShareClassSuffix(name)
+        if (/C$/i.test(name) && candidateBase === normalizedBase) {
+          score += 0.03
+        }
+      }
       if (score > bestScore) {
         bestScore = score
         bestName = name
@@ -251,6 +264,8 @@ async function enhanceHoldings(holdings: RecognizedHolding[], shareClassHints: b
     h.hasShareClassHint = shareClassHints[index] ?? h.hasShareClassHint
     if (!h.hasShareClassHint) {
       h.selected = false
+      h.showSearch = true
+      h.searchKeyword = stripShareClassSuffix(h.name)
     }
   })
   
@@ -295,12 +310,14 @@ async function enhanceHoldings(holdings: RecognizedHolding[], shareClassHints: b
 async function searchAndMatchByName(index: number, name: string) {
   try {
     enhancedHoldings.value[index].searching = true
+    const hasShareHint = !!enhancedHoldings.value[index].hasShareClassHint
+    const baseKeyword = stripShareClassSuffix(name)
     
     // [WHAT] 搜索基金
-    const keyword = name.trim()
+    const keyword = hasShareHint ? name.trim() : baseKeyword
     const results = await searchFund(keyword, 10)
     enhancedHoldings.value[index].searchResults = results
-    enhancedHoldings.value[index].searchKeyword = keyword
+    enhancedHoldings.value[index].searchKeyword = keyword || name.trim()
     
     // [WHAT] 尝试自动匹配（名称高度相似）
     if (results.length > 0) {
@@ -313,7 +330,15 @@ async function searchAndMatchByName(index: number, name: string) {
         r.name.includes(keyword) || keyword.includes(r.name.replace(/[A-Z]$/i, ''))
       )
       
-      const bestMatch = codeMatch || exactMatch || containsMatch
+      // [WHY] OCR 未识别份额类型时，优先匹配 C 类份额
+      const preferCMatch = !hasShareHint
+        ? results.find(r => {
+            const noShareName = stripShareClassSuffix(r.name)
+            return /C$/i.test(r.name) && noShareName === baseKeyword
+          }) || results.find(r => /C$/i.test(r.name) && r.name.includes(baseKeyword))
+        : undefined
+
+      const bestMatch = preferCMatch || codeMatch || exactMatch || containsMatch
       
       if (bestMatch) {
         // [WHAT] 自动选中最佳匹配
@@ -342,10 +367,11 @@ async function selectSearchResult(index: number, fund: FundInfo) {
   holding.code = fund.code
   holding.fundInfo = fund
   holding.name = fund.name
-  holding.showSearch = false
-  holding.searchKeyword = ''
+  holding.searchKeyword = stripShareClassSuffix(fund.name)
   holding.needsCodeMatch = false
   holding.selected = !!holding.hasShareClassHint
+  // [WHY] 未勾选项默认展开修改栏，便于用户确认份额类型
+  holding.showSearch = !holding.selected
   
   // [WHAT] 检查是否已持有
   holding.isAddPosition = holdingStore.hasHolding(fund.code)
@@ -464,7 +490,7 @@ function toggleSearchPanel(index: number) {
   
   // 如果打开面板且没有搜索结果，自动搜索
   if (holding.showSearch && (!holding.searchResults || holding.searchResults.length === 0)) {
-    const initKeyword = holding.searchKeyword || holding.code || holding.name
+    const initKeyword = holding.searchKeyword || stripShareClassSuffix(holding.name) || holding.code || holding.name
     if (initKeyword) {
       manualSearch(index, initKeyword)
     }
