@@ -53,6 +53,8 @@ interface EnhancedHolding extends RecognizedHolding {
   showSearch?: boolean
   /** 手动搜索关键字 */
   searchKeyword?: string
+  /** OCR 原始名称是否包含份额类型（A/C） */
+  hasShareClassHint?: boolean
 }
 const enhancedHoldings = ref<EnhancedHolding[]>([])
 const preloadingEngine = ref(false)
@@ -131,7 +133,9 @@ async function startRecognition(file: File) {
       ocrProgress.value = Math.round(progress * 100)
       ocrStatus.value = status
     })
-    const holdings = await correctHoldingNames(snapshot.holdings)
+    const rawHoldings = snapshot.holdings
+    const shareClassHints = rawHoldings.map(h => hasShareClassType(h.name))
+    const holdings = await correctHoldingNames(rawHoldings)
     snapshotProfitLabel.value = snapshot.profitLabel
     recognizedHoldings.value = holdings
     
@@ -142,7 +146,7 @@ async function startRecognition(file: File) {
     }
     
     // [WHAT] 增强持仓信息（获取基金名称和净值）
-    await enhanceHoldings(holdings)
+    await enhanceHoldings(holdings, shareClassHints)
     step.value = 'preview'
     
   } catch (error) {
@@ -150,6 +154,12 @@ async function startRecognition(file: File) {
     showToast('识别失败，请重试')
     step.value = 'upload'
   }
+}
+
+function hasShareClassType(name?: string): boolean {
+  if (!name) return false
+  // [WHAT] 仅识别基金名称尾部常见份额后缀（A/C）
+  return /[A-C]$/i.test(name.trim())
 }
 
 async function getFundNameMap(): Promise<Map<string, FundInfo>> {
@@ -227,15 +237,22 @@ async function prepareOcrImageSource(file: File): Promise<File | string> {
 }
 
 // [WHAT] 增强持仓信息
-async function enhanceHoldings(holdings: RecognizedHolding[]) {
+async function enhanceHoldings(holdings: RecognizedHolding[], shareClassHints: boolean[]) {
   enhancedHoldings.value = holdings.map(h => ({
     ...h,
     loading: true,
-    // [NEW] 允许选中已持有的基金（用于加仓）
-    selected: h.amount > 0 && (h.code ? true : false),
+    // [WHY] OCR 未识别出份额类型（A/C）时，默认不选中，需用户确认
+    selected: h.amount > 0 && (h.code ? hasShareClassType(h.name) : false),
+    hasShareClassHint: hasShareClassType(h.name),
     isAddPosition: h.code ? holdingStore.hasHolding(h.code) : false,
     needsCodeMatch: h.needsCodeMatch || !h.code
   }))
+  enhancedHoldings.value.forEach((h, index) => {
+    h.hasShareClassHint = shareClassHints[index] ?? h.hasShareClassHint
+    if (!h.hasShareClassHint) {
+      h.selected = false
+    }
+  })
   
   // [WHAT] 并行获取基金信息
   const promises = holdings.map(async (h, index) => {
@@ -328,7 +345,7 @@ async function selectSearchResult(index: number, fund: FundInfo) {
   holding.showSearch = false
   holding.searchKeyword = ''
   holding.needsCodeMatch = false
-  holding.selected = true
+  holding.selected = !!holding.hasShareClassHint
   
   // [WHAT] 检查是否已持有
   holding.isAddPosition = holdingStore.hasHolding(fund.code)

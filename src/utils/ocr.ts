@@ -46,6 +46,10 @@ const FUND_KEYWORDS = [
   '稳健', '纯债', '短债', '定开', '创新', '科技', '消费', '医药', '新能源', '半导体', '智选', '优选', '龙头',
   '增利', '发起'
 ]
+const FUND_COMPANY_PREFIXES = [
+  '易方达', '华夏', '天弘', '富国', '广发', '博时', '南方', '汇添富', '鹏华', '嘉实', '招商', '工银', '中欧',
+  '银华', '景顺', '国泰', '前海开源', '永赢', '德邦', '华安', '中航', '信澳', '摩根'
+]
 
 // [WHY] OCR 常见错字修正（基于真实基金库回归样本）
 const KNOWN_NAME_CORRECTIONS: Array<[RegExp, string]> = [
@@ -188,7 +192,7 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
     if (!h.code && (!h.name || h.name.length < 3)) return false
     if (!h.code && /^(ETF|基金|持仓)$/i.test(h.name.trim())) return false
     // [WHY] 过滤“半导体/易方达”这类短名称误识别
-    if (!h.code && h.name.length <= 4 && !containsFundKeyword(h.name)) return false
+    if (!h.code && h.name.length <= 4 && !containsFundKeyword(h.name) && !hasFundCompanyPrefix(h.name)) return false
     return true
   })
 }
@@ -490,6 +494,10 @@ function applyKnownNameCorrections(name: string): string {
 
 function containsFundKeyword(name: string): boolean {
   return FUND_KEYWORDS.some(kw => name.includes(kw))
+}
+
+function hasFundCompanyPrefix(name: string): boolean {
+  return FUND_COMPANY_PREFIXES.some(prefix => name.startsWith(prefix))
 }
 
 function looksLikeFundName(name: string): boolean {
