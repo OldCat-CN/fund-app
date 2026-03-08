@@ -153,17 +153,18 @@ async function startRecognition(file: File) {
 
 async function prepareOcrImageSource(file: File): Promise<File | string> {
   try {
-    const maxEdge = 2600
+    // [WHY] 长截图按“最长边”压缩会把宽度压得过小（如 1260x13552 -> 242x2600），导致 OCR 严重失真
+    // [WHAT] 改为仅限制宽度，优先保留文字可读性
+    const maxWidth = 1600
     const bitmap = await createImageBitmap(file)
     const width = bitmap.width
     const height = bitmap.height
-    const longest = Math.max(width, height)
-    if (longest <= maxEdge) {
+    if (width <= maxWidth) {
       bitmap.close()
       return file
     }
 
-    const scale = maxEdge / longest
+    const scale = maxWidth / width
     const targetWidth = Math.max(1, Math.round(width * scale))
     const targetHeight = Math.max(1, Math.round(height * scale))
     const canvas = document.createElement('canvas')
