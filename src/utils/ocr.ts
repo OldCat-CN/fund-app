@@ -368,7 +368,8 @@ function parseAlipayFormat(lines: string[]): RecognizedHolding[] {
     if (!nameCandidate || nameCandidate.length < 3 || isExcluded) continue
     if (!looksLikeFundName(nameCandidate)) continue
 
-    const exists = holdings.some(h => h.name === nameCandidate || Math.abs(h.amount - amount) <= 0.01)
+    // [WHY] 不再按金额去重，避免不同基金恰好同金额时被误吞
+    const exists = holdings.some(h => h.name === nameCandidate)
     if (!exists) {
       const currentSignedNumbers = extractSignedNumbers(line)
       const nextSignedNumbers = extractSignedNumbers(nextLine)
