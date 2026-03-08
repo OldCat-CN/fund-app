@@ -54,19 +54,6 @@ export type OcrProgressCallback = (progress: number, status: string) => void
 
 let sharedWorkerPromise: Promise<Worker> | null = null
 let activeProgressCallback: OcrProgressCallback | undefined
-const LOCAL_PADDLE_OCR_URL = 'http://127.0.0.1:5005/api/ocr/holding-snapshot'
-const LOCAL_PADDLE_HEALTH_URL = 'http://127.0.0.1:5005/api/ocr/health'
-
-interface LocalPaddleOcrResponse {
-  success: boolean
-  error?: string
-  data?: {
-    holdings: RecognizedHolding[]
-    profitLabel: ProfitLabelType
-    rawText: string
-    engine?: string
-  }
-}
 
 function mapOcrStatus(status: string): string {
   const statusMap: Record<string, string> = {
@@ -97,17 +84,6 @@ async function getSharedWorker(): Promise<Worker> {
  * 预加载 OCR 引擎，减少首次识别耗时
  */
 export async function preloadOcrEngine(onProgress?: OcrProgressCallback): Promise<void> {
-  // [WHAT] 优先探测本地 PaddleOCR 服务，探测失败后再回退预热 Tesseract
-  try {
-    const ok = await isLocalPaddleReady()
-    if (ok) {
-      if (onProgress) onProgress(1, '本地 OCR 引擎已就绪')
-      return
-    }
-  } catch {
-    // ignore
-  }
-
   activeProgressCallback = onProgress
   try {
     await getSharedWorker()
@@ -124,10 +100,7 @@ export async function preloadOcrEngine(onProgress?: OcrProgressCallback): Promis
  * @param imageSource 图片来源（File 对象、URL 或 Base64）
  * @param onProgress 进度回调
  */
-export async function recognizeText(
-  imageSource: File | string,
-  onProgress?: OcrProgressCallback
-): Promise<string> {
+export async function recognizeText(imageSource: File | string, onProgress?: OcrProgressCallback): Promise<string> {
   const worker = await getSharedWorker()
   activeProgressCallback = onProgress
 
@@ -136,62 +109,6 @@ export async function recognizeText(
     return result.data.text
   } finally {
     activeProgressCallback = undefined
-  }
-}
-
-async function isLocalPaddleReady(): Promise<boolean> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 1200)
-    const resp = await fetch(LOCAL_PADDLE_HEALTH_URL, {
-      method: 'GET',
-      signal: controller.signal
-    })
-    clearTimeout(timeout)
-    return resp.ok
-  } catch {
-    return false
-  }
-}
-
-async function convertToFile(imageSource: File | string): Promise<File> {
-  if (imageSource instanceof File) return imageSource
-  const response = await fetch(imageSource)
-  const blob = await response.blob()
-  return new File([blob], 'ocr-image.jpg', { type: blob.type || 'image/jpeg' })
-}
-
-async function recognizeWithLocalPaddle(
-  imageSource: File | string,
-  onProgress?: OcrProgressCallback
-): Promise<RecognizedHoldingSnapshot | null> {
-  const isReady = await isLocalPaddleReady()
-  if (!isReady) return null
-
-  if (onProgress) onProgress(0.1, '连接本地 OCR 服务...')
-  const file = await convertToFile(imageSource)
-  const form = new FormData()
-  form.append('image', file)
-
-  const response = await fetch(LOCAL_PADDLE_OCR_URL, {
-    method: 'POST',
-    body: form
-  })
-  if (!response.ok) return null
-
-  const payload = await response.json() as LocalPaddleOcrResponse
-  if (!payload.success || !payload.data) return null
-
-  const rawText = payload.data.rawText || ''
-  const parsedByText = rawText ? parseHoldingText(rawText) : []
-  const parsedByService = payload.data.holdings || []
-  const finalHoldings = parsedByText.length >= parsedByService.length ? parsedByText : parsedByService
-
-  if (onProgress) onProgress(1, '本地 OCR 识别完成')
-  return {
-    holdings: finalHoldings,
-    profitLabel: payload.data.profitLabel || parseProfitLabel(rawText),
-    rawText
   }
 }
 
@@ -639,14 +556,6 @@ export async function recognizeHoldingSnapshot(
   imageSource: File | string,
   onProgress?: OcrProgressCallback
 ): Promise<RecognizedHoldingSnapshot> {
-  // [WHY] 优先走本地 PaddleOCR（离线高精度），不可用时回退 Tesseract
-  try {
-    const paddleResult = await recognizeWithLocalPaddle(imageSource, onProgress)
-    if (paddleResult) return paddleResult
-  } catch (error) {
-    console.warn('[OCR] Local PaddleOCR unavailable, fallback to Tesseract:', error)
-  }
-
   const text = await recognizeText(imageSource, onProgress)
   return {
     holdings: parseHoldingText(text),
