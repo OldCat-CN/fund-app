@@ -10,6 +10,7 @@ import {
   type Announcement,
   type RemoteConfig
 } from '@/api/remote'
+import { updateFundListCache, getFundListCacheUpdateTime } from '@/api/fund'
 import { useThemeStore } from '@/stores/theme'
 import { APP_VERSION } from '@/config/version'
 import { showToast } from 'vant'
@@ -21,6 +22,8 @@ const themeStore = useThemeStore()
 const loading = ref(true)
 const config = ref<RemoteConfig | null>(null)
 const activeTab = ref<'settings' | 'announcement' | 'update' | 'about'>('settings')
+const updatingFundList = ref(false)
+const fundListUpdateTime = ref<number | null>(null)
 
 // [WHAT] 更新日志（本地维护）
 const updateLogs = [
@@ -168,6 +171,7 @@ const allAnnouncements = computed(() => {
 
 // [WHAT] 加载远程配置
 onMounted(async () => {
+  fundListUpdateTime.value = getFundListCacheUpdateTime()
   loading.value = true
   try {
     config.value = await fetchRemoteConfig()
@@ -213,6 +217,26 @@ async function copyToClipboard(text: string) {
 function resetReadStatus() {
   clearShownAnnouncements()
   showToast('已重置，下次启动将重新显示公告')
+}
+
+const fundListUpdateText = computed(() => {
+  if (!fundListUpdateTime.value) return '未更新'
+  return new Date(fundListUpdateTime.value).toLocaleString()
+})
+
+async function handleUpdateFundListCache() {
+  if (updatingFundList.value) return
+  updatingFundList.value = true
+  try {
+    const count = await updateFundListCache()
+    fundListUpdateTime.value = Date.now()
+    showToast(`基金列表已更新（${count} 条）`)
+  } catch (error) {
+    console.error('更新基金列表失败:', error)
+    showToast('更新失败，请稍后重试')
+  } finally {
+    updatingFundList.value = false
+  }
 }
 </script>
 
@@ -278,6 +302,17 @@ function resetReadStatus() {
                 @update:model-value="(v: boolean) => themeStore.setTheme(v ? 'auto' : themeStore.actualTheme)"
                 size="20px"
               />
+            </template>
+          </van-cell>
+          <van-cell
+            title="更新基金列表缓存"
+            :label="`上次更新时间：${fundListUpdateText}`"
+            center
+            is-link
+            @click="handleUpdateFundListCache"
+          >
+            <template #right-icon>
+              <van-loading v-if="updatingFundList" size="18" />
             </template>
           </van-cell>
         </van-cell-group>

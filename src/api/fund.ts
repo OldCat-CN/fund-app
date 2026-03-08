@@ -22,6 +22,8 @@ export interface TimeShareData {
 
 // 基金列表缓存（避免重复请求）
 let fundListCache: FundInfo[] | null = null
+const FUND_LIST_STORAGE_KEY = 'fund_list_cache_v1'
+const FUND_LIST_STORAGE_TIME_KEY = 'fund_list_cache_time_v1'
 
 // [WHY] 天天基金接口使用固定的 jsonpgz 回调函数名，需要用队列处理并发请求
 interface PendingRequest {
@@ -133,6 +135,13 @@ export async function fetchFundList(): Promise<FundInfo[]> {
     return fundListCache
   }
 
+  // [WHAT] 优先读取本地缓存（手动更新后可立即生效）
+  const cached = loadFundListFromStorage()
+  if (cached.length > 0) {
+    fundListCache = cached
+    return fundListCache
+  }
+
   // [WHAT] 尝试多个路径加载基金列表
   // [WHY] Capacitor WebView 中路径解析可能不同
   const paths = [
@@ -160,6 +169,49 @@ export async function fetchFundList(): Promise<FundInfo[]> {
   console.error('[Fund API] 所有本地路径加载失败，回退到远程')
   // [EDGE] 本地文件加载失败时，回退到远程 JSONP 请求
   return fetchFundListFromRemote()
+}
+
+function loadFundListFromStorage(): FundInfo[] {
+  try {
+    const raw = localStorage.getItem(FUND_LIST_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed as FundInfo[] : []
+  } catch {
+    return []
+  }
+}
+
+function saveFundListToStorage(list: FundInfo[]): void {
+  try {
+    localStorage.setItem(FUND_LIST_STORAGE_KEY, JSON.stringify(list))
+    localStorage.setItem(FUND_LIST_STORAGE_TIME_KEY, String(Date.now()))
+  } catch {
+    // ignore
+  }
+}
+
+export function getFundListCacheUpdateTime(): number | null {
+  try {
+    const raw = localStorage.getItem(FUND_LIST_STORAGE_TIME_KEY)
+    if (!raw) return null
+    const ts = Number(raw)
+    return Number.isFinite(ts) && ts > 0 ? ts : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 手动更新基金列表缓存（设置页触发）
+ * [WHY] 线上基金名称会变更，本地静态列表可能滞后
+ * [WHAT] 从远程拉取最新列表并写入 localStorage 缓存
+ */
+export async function updateFundListCache(): Promise<number> {
+  const list = await fetchFundListFromRemote()
+  saveFundListToStorage(list)
+  fundListCache = list
+  return list.length
 }
 
 /**
@@ -194,13 +246,14 @@ async function fetchFundListFromRemote(): Promise<FundInfo[]> {
         reject(new Error('基金列表数据格式错误'))
         return
       }
-      fundListCache = rawData.map((item: string[]) => ({
+      const list = rawData.map((item: string[]) => ({
         code: item[0] || '',
         pinyin: item[1] || '',
         name: item[2] || '',
         type: item[3] || ''
       }))
-      resolve(fundListCache!)
+      fundListCache = list
+      resolve(list)
     }
     script.onerror = () => {
       cleanup()
