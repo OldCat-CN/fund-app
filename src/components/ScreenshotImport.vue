@@ -78,6 +78,13 @@ const addPositionCount = computed(() => {
 })
 const allSelectableCount = computed(() => enhancedHoldings.value.filter(h => h.code && h.amount > 0).length)
 
+function clearSearchTimer(index: number) {
+  const timer = searchTimers.get(index)
+  if (!timer) return
+  clearTimeout(timer)
+  searchTimers.delete(index)
+}
+
 watch(
   () => props.show,
   () => {
@@ -364,17 +371,20 @@ async function searchAndMatchByName(index: number, name: string) {
 }
 
 // [NEW] 用户手动选择搜索结果
-async function selectSearchResult(index: number, fund: FundInfo) {
+async function selectSearchResult(index: number, fund: FundInfo, options?: { manual?: boolean }) {
   const holding = enhancedHoldings.value[index]
+  clearSearchTimer(index)
+  const isManualSelection = !!options?.manual
   
   // [WHAT] 更新代码和基金信息
   holding.code = fund.code
   holding.fundInfo = fund
   holding.name = fund.name
-  holding.searchKeyword = stripShareClassSuffix(fund.name)
+  holding.searchKeyword = isManualSelection ? fund.name : stripShareClassSuffix(fund.name)
+  holding.hasShareClassHint = hasShareClassType(fund.name)
   holding.needsCodeMatch = false
-  holding.selected = !!holding.hasShareClassHint
-  // [WHY] 未勾选项默认展开修改栏，便于用户确认份额类型
+  holding.selected = isManualSelection || !!holding.hasShareClassHint
+  // [WHY] 自动匹配且仍未确认份额类型时，保留搜索面板便于用户确认
   holding.showSearch = !holding.selected
   // [FIX] 展开修改栏时自动触发一次搜索，避免用户必须手动改字才出结果
   if (holding.showSearch && holding.searchKeyword) {
@@ -466,10 +476,7 @@ async function manualSearch(index: number, keyword: string) {
   
   const holding = enhancedHoldings.value[index]
   holding.searchKeyword = keyword
-  if (searchTimers.has(index)) {
-    clearTimeout(searchTimers.get(index)!)
-    searchTimers.delete(index)
-  }
+  clearSearchTimer(index)
   if (!trimmed) {
     holding.searchResults = []
     holding.searching = false
@@ -826,7 +833,7 @@ function handleWrapperShowUpdate(value: boolean) {
                   v-for="result in holding.searchResults" 
                   :key="result.code"
                   class="search-result-item"
-                  @click="selectSearchResult(index, result)"
+                  @click="selectSearchResult(index, result, { manual: true })"
                 >
                   <span class="result-name">{{ result.name }}</span>
                   <span class="result-code">{{ result.code }}</span>
