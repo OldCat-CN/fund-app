@@ -152,36 +152,8 @@ async function startRecognition(file: File) {
 }
 
 async function prepareOcrImageSource(file: File): Promise<File | string> {
-  try {
-    // [WHY] 长截图按“最长边”压缩会把宽度压得过小（如 1260x13552 -> 242x2600），导致 OCR 严重失真
-    // [WHAT] 改为仅限制宽度，优先保留文字可读性
-    const maxWidth = 1600
-    const bitmap = await createImageBitmap(file)
-    const width = bitmap.width
-    const height = bitmap.height
-    if (width <= maxWidth) {
-      bitmap.close()
-      return file
-    }
-
-    const scale = maxWidth / width
-    const targetWidth = Math.max(1, Math.round(width * scale))
-    const targetHeight = Math.max(1, Math.round(height * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = targetWidth
-    canvas.height = targetHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      bitmap.close()
-      return file
-    }
-
-    ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
-    bitmap.close()
-    return canvas.toDataURL('image/png')
-  } catch {
-    return file
-  }
+  // [WHAT] 直接使用原图识别，避免压缩带来的文本细节损失
+  return file
 }
 
 // [WHAT] 增强持仓信息
