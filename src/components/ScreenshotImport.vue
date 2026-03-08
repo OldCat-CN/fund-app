@@ -85,6 +85,36 @@ function clearSearchTimer(index: number) {
   searchTimers.delete(index)
 }
 
+const IMPORT_DEBUG_PREFIX = '[截图导入调试]'
+
+function summarizeHoldingForDebug(holding: Partial<EnhancedHolding>) {
+  return {
+    code: holding.code,
+    name: holding.name,
+    amount: holding.amount,
+    confidence: holding.confidence,
+    needsCodeMatch: holding.needsCodeMatch,
+    selected: holding.selected,
+    showSearch: holding.showSearch,
+    searchKeyword: holding.searchKeyword,
+    searchResultCount: holding.searchResults?.length || 0,
+    isAddPosition: holding.isAddPosition,
+    importNetValue: holding.importNetValue,
+    importNavDate: holding.importNavDate
+  }
+}
+
+function logImportStage(stage: string, payload?: unknown) {
+  const label = `${IMPORT_DEBUG_PREFIX}[${stage}]`
+  if (payload === undefined) {
+    console.log(label)
+    return
+  }
+  console.groupCollapsed(label)
+  console.log(payload)
+  console.groupEnd()
+}
+
 watch(
   () => props.show,
   () => {
@@ -128,7 +158,12 @@ async function startRecognition(file: File) {
   step.value = 'recognizing'
   ocrProgress.value = 0
   ocrStatus.value = '准备识别...'
-  
+  logImportStage('Stage A 开始识别', {
+    fileName: file.name,
+    fileSize: file.size,
+    fileType: file.type
+  })
+
   try {
     const ocrSource = await prepareOcrImageSource(file)
 
@@ -142,20 +177,32 @@ async function startRecognition(file: File) {
     })
     const rawHoldings = snapshot.holdings
     const shareClassHints = rawHoldings.map(h => hasShareClassType(h.name))
+    logImportStage('Stage B OCR快照结果', {
+      profitLabel: snapshot.profitLabel,
+      rawText: snapshot.rawText,
+      rawHoldings
+    })
+
     const holdings = await correctHoldingNames(rawHoldings)
     snapshotProfitLabel.value = snapshot.profitLabel
     recognizedHoldings.value = holdings
-    
+    logImportStage('Stage C 名称纠错后结果', {
+      shareClassHints,
+      correctedHoldings: holdings
+    })
+
     if (holdings.length === 0) {
       showToast('未识别到持仓信息，请确保截图清晰')
       step.value = 'upload'
       return
     }
-    
-    // [WHAT] 增强持仓信息（获取基金名称和净值）
+
     await enhanceHoldings(holdings, shareClassHints)
+    logImportStage('Stage F 最终预览结果', {
+      count: enhancedHoldings.value.length,
+      previewHoldings: enhancedHoldings.value.map(summarizeHoldingForDebug)
+    })
     step.value = 'preview'
-    
   } catch (error) {
     console.error('OCR识别失败:', error)
     showToast('识别失败，请重试')
@@ -210,14 +257,17 @@ async function correctHoldingNames(holdings: RecognizedHolding[]): Promise<Recog
   if (!holdings.length) return holdings
   const fundMap = await getFundNameMap()
   const names = Array.from(fundMap.keys())
+  const corrections: Array<Record<string, unknown>> = []
 
-  return holdings.map((h) => {
+  const corrected = holdings.map((h) => {
     if (!h.name || h.code) return h
     const normalized = h.name.replace(/\s+/g, '')
     const hasShareHint = hasShareClassType(normalized)
     if (fundMap.has(normalized)) {
       const exact = fundMap.get(normalized)!
-      return { ...h, name: exact.name, code: exact.code, needsCodeMatch: false, confidence: Math.max(h.confidence, 0.8) }
+      const result = { ...h, name: exact.name, code: exact.code, needsCodeMatch: false, confidence: Math.max(h.confidence, 0.8) }
+      corrections.push({ type: 'exact', from: h, to: result })
+      return result
     }
     let bestName = ''
     let bestScore = 0
@@ -239,16 +289,25 @@ async function correctHoldingNames(holdings: RecognizedHolding[]): Promise<Recog
     }
     if (bestName && bestScore >= 0.72) {
       const matched = fundMap.get(bestName)!
-      return {
+      const result = {
         ...h,
         name: matched.name,
         code: matched.code,
         needsCodeMatch: false,
         confidence: Math.max(h.confidence, Math.min(0.95, bestScore))
       }
+      corrections.push({ type: 'fuzzy', score: bestScore, from: h, to: result })
+      return result
     }
+    corrections.push({ type: 'keep-original', from: h })
     return h
   })
+
+  logImportStage('Stage C.1 名称纠错明细', {
+    count: corrections.length,
+    corrections
+  })
+  return corrected
 }
 
 async function prepareOcrImageSource(file: File): Promise<File | string> {
@@ -261,40 +320,43 @@ async function enhanceHoldings(holdings: RecognizedHolding[], shareClassHints: b
   enhancedHoldings.value = holdings.map(h => ({
     ...h,
     loading: true,
-    // [WHY] OCR 未识别出份额类型（A/C）时，默认不选中，需用户确认
     selected: h.amount > 0 && (h.code ? hasShareClassType(h.name) : false),
     hasShareClassHint: hasShareClassType(h.name),
     isAddPosition: h.code ? holdingStore.hasHolding(h.code) : false,
     needsCodeMatch: h.needsCodeMatch || !h.code
   }))
+  logImportStage('Stage D 初始化预览持仓', {
+    count: enhancedHoldings.value.length,
+    holdings: enhancedHoldings.value.map(summarizeHoldingForDebug)
+  })
+
   enhancedHoldings.value.forEach((h, index) => {
     h.hasShareClassHint = shareClassHints[index] ?? h.hasShareClassHint
     if (!h.hasShareClassHint) {
       h.selected = false
       h.showSearch = true
       h.searchKeyword = stripShareClassSuffix(h.name)
-      // [FIX] 自动填入关键词后立即触发首次搜索，避免空结果占位误导
       if (h.searchKeyword) {
         manualSearch(index, h.searchKeyword)
       }
     }
   })
-  
-  // [WHAT] 并行获取基金信息
+  logImportStage('Stage D.1 初始化份额提示后状态', {
+    holdings: enhancedHoldings.value.map(summarizeHoldingForDebug)
+  })
+
   const promises = holdings.map(async (h, index) => {
-    // [NEW] 如果没有代码但有名称，尝试通过名称搜索匹配
     if (!h.code && h.name) {
       await searchAndMatchByName(index, h.name)
       return
     }
-    
+
     if (!h.code) {
       enhancedHoldings.value[index].loading = false
       return
     }
-    
+
     try {
-      // [WHAT] 获取基金信息
       const results = await searchFund(h.code, 1)
       if (results.length > 0) {
         enhancedHoldings.value[index].fundInfo = results[0]
@@ -302,10 +364,8 @@ async function enhanceHoldings(holdings: RecognizedHolding[], shareClassHints: b
           enhancedHoldings.value[index].name = results[0].name
         }
       }
-      
+
       await fillImportData(index)
-      
-      // [NEW] 检查是否已持有
       enhancedHoldings.value[index].isAddPosition = holdingStore.hasHolding(h.code)
     } catch (error) {
       console.error(`获取基金 ${h.code} 信息失败:`, error)
@@ -313,8 +373,12 @@ async function enhanceHoldings(holdings: RecognizedHolding[], shareClassHints: b
       enhancedHoldings.value[index].loading = false
     }
   })
-  
+
   await Promise.all(promises)
+  logImportStage('Stage E 增强完成后的持仓', {
+    count: enhancedHoldings.value.length,
+    holdings: enhancedHoldings.value.map(summarizeHoldingForDebug)
+  })
 }
 
 // [NEW] 通过名称搜索并自动匹配基金代码
@@ -323,25 +387,28 @@ async function searchAndMatchByName(index: number, name: string) {
     enhancedHoldings.value[index].searching = true
     const hasShareHint = !!enhancedHoldings.value[index].hasShareClassHint
     const baseKeyword = stripShareClassSuffix(name)
-    
-    // [WHAT] 搜索基金
+
     const keyword = hasShareHint ? name.trim() : baseKeyword
     const results = await searchFund(keyword, 10)
     enhancedHoldings.value[index].searchResults = results
     enhancedHoldings.value[index].searchKeyword = keyword || name.trim()
-    
-    // [WHAT] 尝试自动匹配（名称高度相似）
+    logImportStage('Stage E.1 自动搜索候选基金', {
+      index,
+      originalName: name,
+      keyword,
+      hasShareHint,
+      resultCount: results.length,
+      results
+    })
+
     if (results.length > 0) {
       const codeInName = keyword.match(/\d{6}/)?.[0]
       const codeMatch = codeInName ? results.find(r => r.code === codeInName) : undefined
-      // 优先精确匹配
       const exactMatch = results.find(r => r.name === keyword)
-      // 其次检查名称包含关系
-      const containsMatch = results.find(r => 
+      const containsMatch = results.find(r =>
         r.name.includes(keyword) || keyword.includes(r.name.replace(/[A-Z]$/i, ''))
       )
-      
-      // [WHY] OCR 未识别份额类型时，优先匹配 C 类份额
+
       const preferCMatch = !hasShareHint
         ? results.find(r => {
             const noShareName = stripShareClassSuffix(r.name)
@@ -350,12 +417,19 @@ async function searchAndMatchByName(index: number, name: string) {
         : undefined
 
       const bestMatch = preferCMatch || codeMatch || exactMatch || containsMatch
-      
+      logImportStage('Stage E.2 自动匹配决策', {
+        index,
+        keyword,
+        preferCMatch,
+        codeMatch,
+        exactMatch,
+        containsMatch,
+        bestMatch
+      })
+
       if (bestMatch) {
-        // [WHAT] 自动选中最佳匹配
         await selectSearchResult(index, bestMatch)
       } else {
-        // [WHAT] 无法自动匹配，显示搜索面板让用户手动选择
         enhancedHoldings.value[index].showSearch = true
         enhancedHoldings.value[index].loading = false
       }
@@ -375,8 +449,8 @@ async function selectSearchResult(index: number, fund: FundInfo, options?: { man
   const holding = enhancedHoldings.value[index]
   clearSearchTimer(index)
   const isManualSelection = !!options?.manual
-  
-  // [WHAT] 更新代码和基金信息
+  const before = summarizeHoldingForDebug(holding)
+
   holding.code = fund.code
   holding.fundInfo = fund
   holding.name = fund.name
@@ -384,19 +458,21 @@ async function selectSearchResult(index: number, fund: FundInfo, options?: { man
   holding.hasShareClassHint = hasShareClassType(fund.name)
   holding.needsCodeMatch = false
   holding.selected = isManualSelection || !!holding.hasShareClassHint
-  // [WHY] 自动匹配且仍未确认份额类型时，保留搜索面板便于用户确认
   holding.showSearch = !holding.selected
-  // [FIX] 展开修改栏时自动触发一次搜索，避免用户必须手动改字才出结果
   if (holding.showSearch && holding.searchKeyword) {
     manualSearch(index, holding.searchKeyword)
   }
-  
-  // [WHAT] 检查是否已持有
+
   holding.isAddPosition = holdingStore.hasHolding(fund.code)
-  
   await fillImportData(index)
-  
   holding.loading = false
+  logImportStage('Stage E.3 选中基金结果', {
+    index,
+    manual: isManualSelection,
+    selectedFund: fund,
+    before,
+    after: summarizeHoldingForDebug(holding)
+  })
 }
 
 function getTodayDate(): string {
@@ -473,10 +549,15 @@ async function fillImportData(index: number) {
 // [NEW] 手动搜索基金
 async function manualSearch(index: number, keyword: string) {
   const trimmed = keyword.trim()
-  
+
   const holding = enhancedHoldings.value[index]
   holding.searchKeyword = keyword
   clearSearchTimer(index)
+  logImportStage('Stage E.4 手动搜索输入', {
+    index,
+    keyword,
+    currentHolding: summarizeHoldingForDebug(holding)
+  })
   if (!trimmed) {
     holding.searchResults = []
     holding.searching = false
@@ -488,6 +569,12 @@ async function manualSearch(index: number, keyword: string) {
       const results = await searchFund(trimmed, 10)
       holding.searchResults = results
       holding.showSearch = true
+      logImportStage('Stage E.5 手动搜索结果', {
+        index,
+        keyword: trimmed,
+        resultCount: results.length,
+        results
+      })
     } catch (error) {
       console.error('搜索失败:', error)
       showToast('搜索失败')

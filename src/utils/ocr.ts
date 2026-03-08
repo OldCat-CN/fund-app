@@ -64,6 +64,35 @@ export type OcrProgressCallback = (progress: number, status: string) => void
 let sharedWorkerPromise: Promise<Worker> | null = null
 let activeProgressCallback: OcrProgressCallback | undefined
 
+const OCR_DEBUG_PREFIX = '[OCR 调试]'
+
+function debugOcrStage(stage: string, payload?: unknown) {
+  const label = `${OCR_DEBUG_PREFIX}[${stage}]`
+  if (payload === undefined) {
+    console.log(label)
+    return
+  }
+  console.groupCollapsed(label)
+  console.log(payload)
+  console.groupEnd()
+}
+
+function describeImageSource(imageSource: File | string) {
+  if (typeof File !== 'undefined' && imageSource instanceof File) {
+    return {
+      type: 'file',
+      name: imageSource.name,
+      size: imageSource.size,
+      mimeType: imageSource.type,
+      lastModified: imageSource.lastModified
+    }
+  }
+  return {
+    type: 'string',
+    preview: String(imageSource).slice(0, 120)
+  }
+}
+
 function mapOcrStatus(status: string): string {
   const statusMap: Record<string, string> = {
     'loading tesseract core': '加载识别引擎...',
@@ -112,9 +141,23 @@ export async function preloadOcrEngine(onProgress?: OcrProgressCallback): Promis
 export async function recognizeText(imageSource: File | string, onProgress?: OcrProgressCallback): Promise<string> {
   const worker = await getSharedWorker()
   activeProgressCallback = onProgress
+  debugOcrStage('Stage 1 OCR输入图片', describeImageSource(imageSource))
 
   try {
     const result = await worker.recognize(imageSource)
+    const pageData = result.data as typeof result.data & {
+      words?: unknown[]
+      lines?: unknown[]
+    }
+    debugOcrStage('Stage 1.5 OCR原始识别结果', {
+      confidence: result.data.confidence,
+      textLength: result.data.text.length,
+      rawText: result.data.text,
+      wordCount: pageData.words?.length || 0,
+      lineCount: pageData.lines?.length || 0,
+      words: pageData.words,
+      lines: pageData.lines
+    })
     return result.data.text
   } finally {
     activeProgressCallback = undefined
@@ -129,26 +172,47 @@ export async function recognizeText(imageSource: File | string, onProgress?: Ocr
 export function parseHoldingText(text: string): RecognizedHolding[] {
   const holdings: RecognizedHolding[] = []
   const lines = text.split('\n').map(line => line.trim()).filter(Boolean)
-  
-  // [WHAT] 预处理：合并相邻行（有些平台名称和代码在不同行）
+  debugOcrStage('Stage 2 原始文本分行', {
+    lineCount: lines.length,
+    lines
+  })
+
   const processedLines = preprocessLines(lines)
-  
-  // [WHAT] 解析每一行，尝试提取持仓信息
+  debugOcrStage('Stage 3 预处理后文本行', {
+    lineCount: processedLines.length,
+    processedLines
+  })
+
+  const singleLineMatches: Array<{ line: string; holding: RecognizedHolding }> = []
   for (const line of processedLines) {
     const holding = parseSingleLine(line)
     if (holding) {
       holdings.push(holding)
+      singleLineMatches.push({ line, holding })
     }
   }
-  
-  // [WHAT] 如果单行解析失败，尝试多行组合解析
+  debugOcrStage('Stage 4 单行解析命中', {
+    count: singleLineMatches.length,
+    matches: singleLineMatches
+  })
+
+  let multiLineHoldings: RecognizedHolding[] = []
   if (holdings.length === 0) {
-    const multiLineHoldings = parseMultiLine(lines)
+    multiLineHoldings = parseMultiLine(lines)
     holdings.push(...multiLineHoldings)
   }
-  
-  // [WHAT] 始终尝试支付宝格式解析，补足“名称+金额分行”的场景
+  debugOcrStage('Stage 5 多行补充解析', {
+    count: multiLineHoldings.length,
+    holdings: multiLineHoldings
+  })
+
   const alipayHoldings = parseAlipayFormat(lines)
+  debugOcrStage('Stage 6 支付宝格式解析', {
+    count: alipayHoldings.length,
+    holdings: alipayHoldings
+  })
+
+  const mergeActions: Array<Record<string, unknown>> = []
   for (const ah of alipayHoldings) {
     const existingIndex = holdings.findIndex(h => {
       const sameCode = !!h.code && !!ah.code && h.code === ah.code
@@ -163,10 +227,10 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
     })
     if (existingIndex === -1) {
       holdings.push(ah)
+      mergeActions.push({ action: 'append', holding: ah })
       continue
     }
 
-    // [WHY] 同金额同标的时，优先保留更完整的基金名称（处理跨行名称被截断）
     const existing = holdings[existingIndex]
     const shouldUpgradeName =
       ah.name.length > existing.name.length &&
@@ -183,18 +247,44 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
         holdingProfit: ah.holdingProfit ?? existing.holdingProfit,
         holdingProfitRate: ah.holdingProfitRate ?? existing.holdingProfitRate
       }
+      mergeActions.push({ action: 'upgrade-name', from: existing, to: holdings[existingIndex] })
+    } else {
+      mergeActions.push({ action: 'skip-duplicate', existing, incoming: ah })
     }
   }
+  debugOcrStage('Stage 7 解析结果合并', {
+    count: holdings.length,
+    mergeActions,
+    holdings
+  })
 
-  // [WHAT] 过滤明显噪音结果
-  return holdings.filter(h => {
-    if (h.amount < 10) return false
-    if (!h.code && (!h.name || h.name.length < 3)) return false
-    if (!h.code && /^(ETF|基金|持仓)$/i.test(h.name.trim())) return false
-    // [WHY] 过滤“半导体/易方达”这类短名称误识别
-    if (!h.code && h.name.length <= 4 && !containsFundKeyword(h.name) && !hasFundCompanyPrefix(h.name)) return false
+  const filteredOut: Array<{ reason: string; holding: RecognizedHolding }> = []
+  const filteredHoldings = holdings.filter(h => {
+    if (h.amount < 10) {
+      filteredOut.push({ reason: 'amount < 10', holding: h })
+      return false
+    }
+    if (!h.code && (!h.name || h.name.length < 3)) {
+      filteredOut.push({ reason: 'name too short', holding: h })
+      return false
+    }
+    if (!h.code && /^(ETF|基金|持仓)$/i.test(h.name.trim())) {
+      filteredOut.push({ reason: 'generic noise name', holding: h })
+      return false
+    }
+    if (!h.code && h.name.length <= 4 && !containsFundKeyword(h.name) && !hasFundCompanyPrefix(h.name)) {
+      filteredOut.push({ reason: 'short non-fund-like name', holding: h })
+      return false
+    }
     return true
   })
+  debugOcrStage('Stage 8 噪音过滤结果', {
+    keptCount: filteredHoldings.length,
+    removedCount: filteredOut.length,
+    removed: filteredOut,
+    holdings: filteredHoldings
+  })
+  return filteredHoldings
 }
 
 /**
@@ -585,11 +675,15 @@ export async function recognizeHoldingSnapshot(
   onProgress?: OcrProgressCallback
 ): Promise<RecognizedHoldingSnapshot> {
   const text = await recognizeText(imageSource, onProgress)
-  return {
-    holdings: parseHoldingText(text),
-    profitLabel: parseProfitLabel(text),
+  const holdings = parseHoldingText(text)
+  const profitLabel = parseProfitLabel(text)
+  const snapshot = {
+    holdings,
+    profitLabel,
     rawText: text
   }
+  debugOcrStage('Stage 9 OCR快照汇总', snapshot)
+  return snapshot
 }
 
 /**
