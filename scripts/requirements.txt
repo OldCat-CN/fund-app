@@ -2,3 +2,5 @@
 requests==2.31.0
 flask==3.0.0
 flask-cors==4.0.0
+paddleocr==2.10.0
+rapidfuzz==3.10.1

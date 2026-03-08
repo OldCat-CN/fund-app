@@ -7,7 +7,7 @@
 import { ref, computed, watch } from 'vue'
 import { showToast, showLoadingToast, closeToast } from 'vant'
 import { recognizeHoldingSnapshot, preloadOcrEngine, type RecognizedHolding, type ProfitLabelType } from '@/utils/ocr'
-import { searchFund } from '@/api/fund'
+import { searchFund, fetchFundList } from '@/api/fund'
 import { fetchFundAccurateData, fetchNetValueHistoryFast } from '@/api/fundFast'
 import { useHoldingStore } from '@/stores/holding'
 import type { HoldingRecord, FundInfo } from '@/types/fund'
@@ -58,6 +58,7 @@ const enhancedHoldings = ref<EnhancedHolding[]>([])
 const preloadingEngine = ref(false)
 const ocrEngineReady = ref(false)
 const searchTimers = new Map<number, ReturnType<typeof setTimeout>>()
+let fundNameMapCache: Map<string, FundInfo> | null = null
 const profitLabelText = computed(() => {
   if (snapshotProfitLabel.value === 'today') return '今日收益'
   if (snapshotProfitLabel.value === 'yesterday') return '昨日收益'
@@ -130,7 +131,7 @@ async function startRecognition(file: File) {
       ocrProgress.value = Math.round(progress * 100)
       ocrStatus.value = status
     })
-    const holdings = snapshot.holdings
+    const holdings = await correctHoldingNames(snapshot.holdings)
     snapshotProfitLabel.value = snapshot.profitLabel
     recognizedHoldings.value = holdings
     
@@ -149,6 +150,75 @@ async function startRecognition(file: File) {
     showToast('识别失败，请重试')
     step.value = 'upload'
   }
+}
+
+async function getFundNameMap(): Promise<Map<string, FundInfo>> {
+  if (fundNameMapCache) return fundNameMapCache
+  const list = await fetchFundList()
+  const map = new Map<string, FundInfo>()
+  list.forEach(item => {
+    if (item.name) map.set(item.name, item)
+  })
+  fundNameMapCache = map
+  return map
+}
+
+function quickSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0
+  if (a === b) return 1
+  if (a.includes(b) || b.includes(a)) {
+    return Math.min(a.length, b.length) / Math.max(a.length, b.length)
+  }
+  const freq = new Map<string, number>()
+  for (const ch of a) {
+    freq.set(ch, (freq.get(ch) || 0) + 1)
+  }
+  let overlap = 0
+  for (const ch of b) {
+    const cnt = freq.get(ch) || 0
+    if (cnt > 0) {
+      overlap++
+      freq.set(ch, cnt - 1)
+    }
+  }
+  return (2 * overlap) / (a.length + b.length)
+}
+
+async function correctHoldingNames(holdings: RecognizedHolding[]): Promise<RecognizedHolding[]> {
+  if (!holdings.length) return holdings
+  const fundMap = await getFundNameMap()
+  const names = Array.from(fundMap.keys())
+
+  return holdings.map((h) => {
+    if (!h.name || h.code) return h
+    const normalized = h.name.replace(/\s+/g, '')
+    if (fundMap.has(normalized)) {
+      const exact = fundMap.get(normalized)!
+      return { ...h, name: exact.name, code: exact.code, needsCodeMatch: false, confidence: Math.max(h.confidence, 0.8) }
+    }
+    let bestName = ''
+    let bestScore = 0
+    for (const name of names) {
+      if (Math.abs(name.length - normalized.length) > 8) continue
+      if (normalized[0] && name[0] && normalized[0] !== name[0]) continue
+      const score = quickSimilarity(normalized, name)
+      if (score > bestScore) {
+        bestScore = score
+        bestName = name
+      }
+    }
+    if (bestName && bestScore >= 0.72) {
+      const matched = fundMap.get(bestName)!
+      return {
+        ...h,
+        name: matched.name,
+        code: matched.code,
+        needsCodeMatch: false,
+        confidence: Math.max(h.confidence, Math.min(0.95, bestScore))
+      }
+    }
+    return h
+  })
 }
 
 async function prepareOcrImageSource(file: File): Promise<File | string> {
