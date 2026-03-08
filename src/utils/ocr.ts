@@ -2,7 +2,7 @@
 // [WHAT] 使用 Tesseract.js 进行本地文字识别，无需外部 API
 // [DEPS] 依赖 tesseract.js 库
 
-import Tesseract from 'tesseract.js'
+import Tesseract, { PSM } from 'tesseract.js'
 import type { Worker, LoggerMessage } from 'tesseract.js'
 
 /**
@@ -50,6 +50,13 @@ const FUND_COMPANY_PREFIXES = [
   '易方达', '华夏', '天弘', '富国', '广发', '博时', '南方', '汇添富', '鹏华', '嘉实', '招商', '工银', '中欧',
   '银华', '景顺', '国泰', '前海开源', '永赢', '德邦', '华安', '中航', '信澳', '摩根'
 ]
+const FUND_PROMOTION_NOISE_PATTERNS = [
+  /^该基金/,
+  /加仓人数/,
+  /人加自选/,
+  /关注度/,
+  /市场节奏/
+]
 
 // [WHY] OCR 常见错字修正（基于真实基金库回归样本）
 const KNOWN_NAME_CORRECTIONS: Array<[RegExp, string]> = [
@@ -66,9 +73,16 @@ let activeProgressCallback: OcrProgressCallback | undefined
 
 const OCR_DEBUG_PREFIX = '[OCR 调试]'
 const OCR_LANG_PATH = typeof window !== 'undefined' ? '/tessdata' : './public/tessdata'
-const OCR_CACHE_PATH = 'ocr-cache/local-tessdata-v1'
+const OCR_CACHE_PATH = 'ocr-cache/local-tessdata-v2-chi-sim-psm6'
 const OCR_WORKER_PATH = typeof window !== 'undefined' ? '/tesseract/worker.min.js' : undefined
 const OCR_CORE_PATH = typeof window !== 'undefined' ? '/tesseract-core' : undefined
+const OCR_PRIMARY_LANGS = 'chi_sim'
+const OCR_PRIMARY_PAGE_SEG_MODE = PSM.SINGLE_BLOCK
+const OCR_PRIMARY_PARAMETERS = {
+  tessedit_pageseg_mode: OCR_PRIMARY_PAGE_SEG_MODE,
+  preserve_interword_spaces: '1',
+  user_defined_dpi: '300'
+}
 
 function debugOcrStage(stage: string, payload?: unknown) {
   const label = `${OCR_DEBUG_PREFIX}[${stage}]`
@@ -116,7 +130,9 @@ function emitProgress(message: LoggerMessage) {
 async function getSharedWorker(): Promise<Worker> {
   if (!sharedWorkerPromise) {
     debugOcrStage('Stage 0 OCR资源配置', {
-      langs: 'chi_sim+eng',
+      langs: OCR_PRIMARY_LANGS,
+      pageSegMode: OCR_PRIMARY_PAGE_SEG_MODE,
+      parameters: OCR_PRIMARY_PARAMETERS,
       workerPath: OCR_WORKER_PATH || '(default)',
       corePath: OCR_CORE_PATH || '(default)',
       langPath: OCR_LANG_PATH,
@@ -131,10 +147,18 @@ async function getSharedWorker(): Promise<Worker> {
       ...(OCR_WORKER_PATH ? { workerPath: OCR_WORKER_PATH } : {}),
       ...(OCR_CORE_PATH ? { corePath: OCR_CORE_PATH } : {})
     }
-    sharedWorkerPromise = Tesseract.createWorker('chi_sim+eng', undefined, workerOptions).catch((error) => {
-      sharedWorkerPromise = null
-      throw error
-    })
+    sharedWorkerPromise = Tesseract.createWorker(OCR_PRIMARY_LANGS, undefined, workerOptions)
+      .then(async (worker) => {
+        // [WHY] 基金截图是中文主场景；仅启用 `chi_sim` 并固定为单块文本模式，
+        // [WHAT] 可明显减少把中文行误判成拉丁字符（如 `KmBEERAC`）的问题。
+        await worker.setParameters(OCR_PRIMARY_PARAMETERS)
+        debugOcrStage('Stage 0.5 OCR参数已应用', OCR_PRIMARY_PARAMETERS)
+        return worker
+      })
+      .catch((error) => {
+        sharedWorkerPromise = null
+        throw error
+      })
   }
   return sharedWorkerPromise
 }
@@ -154,7 +178,7 @@ export async function preloadOcrEngine(onProgress?: OcrProgressCallback): Promis
 
 /**
  * 从图片中识别文字
- * [WHY] 使用 Tesseract.js 进行本地 OCR，支持中英文混合识别
+ * [WHY] 使用 Tesseract.js 进行本地 OCR，面向中文基金截图优先识别
  * [WHAT] 返回识别出的原始文字
  * @param imageSource 图片来源（File 对象、URL 或 Base64）
  * @param onProgress 进度回调
@@ -614,12 +638,17 @@ function hasFundCompanyPrefix(name: string): boolean {
 
 function looksLikeFundName(name: string): boolean {
   if (!name || name.length < 4) return false
+  if (isFundPromotionNoise(name)) return false
   const chineseCount = (name.match(/[\u4e00-\u9fa5]/g) || []).length
   // [WHY] 过滤“KmBEERAC本”这类英文噪声，至少要有一定中文信息
   if (chineseCount < 2) return false
   if (containsFundKeyword(name)) return true
   // [EDGE] 某些名称关键词缺失时，要求中文字符更充分
   return chineseCount >= 4 && name.length >= 8
+}
+
+function isFundPromotionNoise(name: string): boolean {
+  return FUND_PROMOTION_NOISE_PATTERNS.some(pattern => pattern.test(name))
 }
 
 function stripNameNoiseSuffix(text: string): string {
