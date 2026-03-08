@@ -65,8 +65,8 @@ let sharedWorkerPromise: Promise<Worker> | null = null
 let activeProgressCallback: OcrProgressCallback | undefined
 
 const OCR_DEBUG_PREFIX = '[OCR 调试]'
-const OCR_LANG_PATH = 'https://tessdata.projectnaptha.com/4.0.0_best'
-const OCR_CACHE_PATH = 'ocr-cache/projectnaptha-4.0.0-best-v1'
+const OCR_LANG_PATH = typeof window !== 'undefined' ? '/tessdata' : './public/tessdata'
+const OCR_CACHE_PATH = 'ocr-cache/local-tessdata-v1'
 const OCR_WORKER_PATH = typeof window !== 'undefined' ? '/tesseract/worker.min.js' : undefined
 const OCR_CORE_PATH = typeof window !== 'undefined' ? '/tesseract-core' : undefined
 
@@ -121,13 +121,13 @@ async function getSharedWorker(): Promise<Worker> {
       corePath: OCR_CORE_PATH || '(default)',
       langPath: OCR_LANG_PATH,
       cachePath: OCR_CACHE_PATH,
-      gzip: true
+      gzip: false
     })
     const workerOptions = {
       logger: emitProgress,
       langPath: OCR_LANG_PATH,
       cachePath: OCR_CACHE_PATH,
-      gzip: true,
+      gzip: false,
       ...(OCR_WORKER_PATH ? { workerPath: OCR_WORKER_PATH } : {}),
       ...(OCR_CORE_PATH ? { corePath: OCR_CORE_PATH } : {})
     }
