@@ -504,10 +504,7 @@ function parseAlipayFormat(lines: string[]): RecognizedHolding[] {
     if (!exists) {
       const currentSignedNumbers = extractSignedNumbers(line)
       const nextSignedNumbers = extractSignedNumbers(nextLine)
-      const holdingProfit =
-        currentSignedNumbers.length > 0
-          ? currentSignedNumbers[currentSignedNumbers.length - 1]
-          : undefined
+      const holdingProfit = pickHoldingProfitFromMainRow(line, amount)
       const holdingProfitRate = pickHoldingProfitRate(nextSignedNumbers, currentSignedNumbers)
       holdings.push({
         code: '',
@@ -687,6 +684,41 @@ function parseAmount(amountStr: string): number {
   }
   const amount = parseFloat(cleaned)
   return isNaN(amount) ? 0 : amount
+}
+
+
+type ParsedNumericToken = {
+  raw: string
+  value: number
+  hasSign: boolean
+  isPercent: boolean
+  index: number
+}
+
+function extractNumericTokens(line: string): ParsedNumericToken[] {
+  return Array.from(line.matchAll(/[+\-]?\d[\d,\.]*\.\d{2}%?/g)).map(match => {
+    const raw = match[0]
+    return {
+      raw,
+      value: parseAmount(raw.replace('%', '')),
+      hasSign: /^[+\-]/.test(raw),
+      isPercent: raw.endsWith('%'),
+      index: match.index || 0
+    }
+  }).filter(token => !isNaN(token.value) && isFinite(token.value))
+}
+
+function pickHoldingProfitFromMainRow(line: string, amount: number): number | undefined {
+  const tokens = extractNumericTokens(line).filter(token => !token.isPercent)
+  if (tokens.length <= 1) return undefined
+
+  const amountIndex = tokens.findIndex(token => Math.abs(token.value - amount) <= 0.01)
+  const profitCandidates = tokens.filter((_, index) => index !== amountIndex)
+  if (profitCandidates.length === 0) return undefined
+
+  const profitToken = profitCandidates[profitCandidates.length - 1]
+  if (Math.abs(profitToken.value) > Math.max(amount * 2, 999999)) return undefined
+  return profitToken.value
 }
 
 /**
