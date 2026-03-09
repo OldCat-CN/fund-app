@@ -275,15 +275,20 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
         ah.name.includes(existing.name) ||
         existing.name.includes(ah.name.slice(0, 4))
       )
+    const mergedHolding = {
+      ...existing,
+      name: shouldUpgradeName ? ah.name : existing.name,
+      confidence: Math.max(existing.confidence, ah.confidence),
+      holdingProfit: ah.holdingProfit ?? existing.holdingProfit,
+      holdingProfitRate: ah.holdingProfitRate ?? existing.holdingProfitRate,
+      needsCodeMatch: existing.needsCodeMatch ?? ah.needsCodeMatch
+    }
+    holdings[existingIndex] = mergedHolding
+
     if (shouldUpgradeName) {
-      holdings[existingIndex] = {
-        ...existing,
-        name: ah.name,
-        confidence: Math.max(existing.confidence, ah.confidence),
-        holdingProfit: ah.holdingProfit ?? existing.holdingProfit,
-        holdingProfitRate: ah.holdingProfitRate ?? existing.holdingProfitRate
-      }
-      mergeActions.push({ action: 'upgrade-name', from: existing, to: holdings[existingIndex] })
+      mergeActions.push({ action: 'upgrade-name', from: existing, incoming: ah, to: mergedHolding })
+    } else if (ah.holdingProfit !== undefined || ah.holdingProfitRate !== undefined) {
+      mergeActions.push({ action: 'merge-profit-metrics', from: existing, incoming: ah, to: mergedHolding })
     } else {
       mergeActions.push({ action: 'skip-duplicate', existing, incoming: ah })
     }
