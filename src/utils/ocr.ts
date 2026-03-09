@@ -53,7 +53,7 @@ const FUND_KEYWORDS = [
 ]
 const FUND_COMPANY_PREFIXES = [
   '易方达', '华夏', '天弘', '富国', '广发', '博时', '南方', '汇添富', '鹏华', '嘉实', '招商', '工银', '中欧',
-  '银华', '景顺', '国泰', '前海开源', '永赢', '德邦', '华安', '中航', '信澳', '摩根'
+  '银华', '景顺', '国泰', '前海开源', '永赢', '德邦', '华安', '中航', '信澳', '摩根', '诺德'
 ]
 const FUND_PROMOTION_NOISE_PATTERNS = [
   /^该基金/,
@@ -657,6 +657,7 @@ function looksLikeFundName(name: string): boolean {
   // [WHY] 过滤“KmBEERAC本”这类英文噪声，至少要有一定中文信息
   if (chineseCount < 2) return false
   if (containsFundKeyword(name)) return true
+  if (hasFundCompanyPrefix(name) && (chineseCount >= 4 || /[A-C]$/i.test(name))) return true
   // [EDGE] 某些名称关键词缺失时，要求中文字符更充分
   return chineseCount >= 4 && name.length >= 8
 }
@@ -759,11 +760,20 @@ type TsvRow = {
   words: TsvWord[]
 }
 
+type OcrCropRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
 type LayoutHoldingCandidate = {
   name: string
   amount: number
   holdingProfit?: number
   holdingProfitRate?: number
+  amountLeft: number
+  cropRect: OcrCropRect
 }
 
 function parseTsvRows(tsv?: string): TsvRow[] {
@@ -858,23 +868,34 @@ function buildLayoutHoldingCandidates(tsv?: string): LayoutHoldingCandidate[] {
     const amountToken = pickAmountTokenFromRow(extractNumericTokensFromRow(row))
     if (!amountToken) continue
 
+    const nextRowInBlock = rows[index + 1] && rows[index + 1]!.top - row.bottom <= 120
+      ? rows[index + 1]!
+      : undefined
     let nameCandidate = extractRowNameBeforeAmount(row, amountToken.left)
-    const nextRow = rows[index + 1]
-    const nextNamePart = nextRow && nextRow.top - row.bottom <= 120
-      ? extractRowNameBeforeAmount(nextRow, amountToken.left)
+    const nextNamePart = nextRowInBlock
+      ? extractRowNameBeforeAmount(nextRowInBlock, amountToken.left)
       : ''
     if (nextNamePart && shouldJoinNameContinuation(nameCandidate, nextNamePart)) {
       nameCandidate = `${nameCandidate}${nextNamePart}`
     }
     if (!looksLikeFundName(nameCandidate)) continue
 
+    const cropTop = Math.max(0, row.top - 20)
+    const cropBottom = (nextRowInBlock?.bottom || row.bottom) + 20
     candidates.push({
       name: nameCandidate,
       amount: amountToken.value,
       holdingProfit: pickHoldingProfitFromMainRow(row.text, amountToken.value),
       holdingProfitRate:
-        pickHoldingProfitRateFromRow(nextRow, amountToken.left) ??
-        pickHoldingProfitRateFromRow(row, amountToken.left)
+        pickHoldingProfitRateFromRow(nextRowInBlock, amountToken.left) ??
+        pickHoldingProfitRateFromRow(row, amountToken.left),
+      amountLeft: amountToken.left,
+      cropRect: {
+        left: Math.max(0, amountToken.left - 90),
+        top: cropTop,
+        width: 520,
+        height: Math.max(80, cropBottom - cropTop)
+      }
     })
   }
 
@@ -893,6 +914,13 @@ function isSameHoldingCandidateName(left: string, right: string): boolean {
   )
 }
 
+function matchLayoutCandidate(holding: RecognizedHolding, candidates: LayoutHoldingCandidate[]) {
+  return candidates.find(item => (
+    Math.abs((item.amount || 0) - (holding.amount || 0)) <= 0.01 &&
+    isSameHoldingCandidateName(item.name, holding.name)
+  ))
+}
+
 function enrichHoldingsWithTsvLayout(holdings: RecognizedHolding[], tsv?: string): RecognizedHolding[] {
   const candidates = buildLayoutHoldingCandidates(tsv)
   if (candidates.length === 0) return holdings
@@ -900,10 +928,7 @@ function enrichHoldingsWithTsvLayout(holdings: RecognizedHolding[], tsv?: string
   return holdings.map(holding => {
     if (holding.holdingProfit !== undefined && holding.holdingProfitRate !== undefined) return holding
 
-    const candidate = candidates.find(item => (
-      Math.abs((item.amount || 0) - (holding.amount || 0)) <= 0.01 &&
-      isSameHoldingCandidateName(item.name, holding.name)
-    ))
+    const candidate = matchLayoutCandidate(holding, candidates)
     if (!candidate) return holding
 
     return {
@@ -913,6 +938,61 @@ function enrichHoldingsWithTsvLayout(holdings: RecognizedHolding[], tsv?: string
       confidence: Math.max(holding.confidence, 0.7)
     }
   })
+}
+
+async function recoverMissingMetricsWithRowCrop(
+  imageSource: File | string,
+  holdings: RecognizedHolding[],
+  tsv?: string
+): Promise<RecognizedHolding[]> {
+  const candidates = buildLayoutHoldingCandidates(tsv)
+  if (candidates.length === 0) return holdings
+  if (!holdings.some(item => item.holdingProfit === undefined || item.holdingProfitRate === undefined)) {
+    return holdings
+  }
+
+  const worker = await getSharedWorker()
+  const updatedHoldings = [...holdings]
+
+  try {
+    await worker.setParameters({
+      ...OCR_PRIMARY_PARAMETERS,
+      tessedit_pageseg_mode: PSM.SPARSE_TEXT
+    })
+
+    for (let index = 0; index < updatedHoldings.length; index++) {
+      const holding = updatedHoldings[index]!
+      if (holding.holdingProfit !== undefined && holding.holdingProfitRate !== undefined) continue
+
+      const candidate = matchLayoutCandidate(holding, candidates)
+      if (!candidate) continue
+
+      const result = await worker.recognize(imageSource, {
+        rectangle: candidate.cropRect
+      })
+      const cropLines = result.data.text.split('\n').map(line => line.trim()).filter(Boolean)
+      if (cropLines.length === 0) continue
+
+      const cropMainLine = cropLines[0] || ''
+      const cropSecondaryLine = cropLines[1] || ''
+      const cropProfit = pickHoldingProfitFromMainRow(cropMainLine, holding.amount)
+      const cropProfitRate = pickHoldingProfitRate(
+        extractSignedNumbers(cropSecondaryLine),
+        extractSignedNumbers(cropMainLine)
+      )
+
+      updatedHoldings[index] = {
+        ...holding,
+        holdingProfit: holding.holdingProfit ?? cropProfit,
+        holdingProfitRate: holding.holdingProfitRate ?? cropProfitRate,
+        confidence: Math.max(holding.confidence, cropProfit !== undefined || cropProfitRate !== undefined ? 0.72 : holding.confidence)
+      }
+    }
+  } finally {
+    await worker.setParameters(OCR_PRIMARY_PARAMETERS)
+  }
+
+  return updatedHoldings
 }
 
 /**
@@ -947,7 +1027,8 @@ export async function recognizeHoldingSnapshot(
   onProgress?: OcrProgressCallback
 ): Promise<RecognizedHoldingSnapshot> {
   const payload = await recognizePageData(imageSource, onProgress)
-  const holdings = parseHoldingText(payload.text, payload.tsv)
+  const parsedHoldings = parseHoldingText(payload.text, payload.tsv)
+  const holdings = await recoverMissingMetricsWithRowCrop(imageSource, parsedHoldings, payload.tsv)
   const profitLabel = parseProfitLabel(payload.text)
   const snapshot = {
     holdings,

@@ -75,6 +75,16 @@ type HoldingSortMode = 'none' | 'rate_desc' | 'rate_asc' | 'amount_desc' | 'amou
 type HoldingSortKey = 'today' | 'profit'
 const activeHoldingSortKey = ref<HoldingSortKey | ''>('')
 const holdingSortMode = ref<HoldingSortMode>('none')
+const HOLDING_LONG_PRESS_MS = 500
+const isMultiSelectMode = ref(false)
+const selectedHoldingCodes = ref<string[]>([])
+const selectedHoldingCount = computed(() => selectedHoldingCodes.value.length)
+const isAllHoldingSelected = computed(() => (
+  holdingStore.holdings.length > 0 &&
+  selectedHoldingCodes.value.length === holdingStore.holdings.length
+))
+let holdingPressTimer: ReturnType<typeof setTimeout> | null = null
+let holdingLongPressTriggered = false
 
 // [WHAT] 页面挂载时初始化数据
 onMounted(() => {
@@ -88,6 +98,16 @@ onMounted(() => {
   // [WHAT] 支持从详情页携带参数直接打开交易入口
   handleRouteActions()
 })
+
+watch(
+  () => holdingStore.holdings.map(item => item.code),
+  (codes) => {
+    selectedHoldingCodes.value = selectedHoldingCodes.value.filter(code => codes.includes(code))
+    if (selectedHoldingCodes.value.length === 0) {
+      isMultiSelectMode.value = false
+    }
+  }
+)
 
 // [WHAT] 汇总统计样式
 const summaryProfitClass = computed(() => {
@@ -226,7 +246,108 @@ async function handleDelete(code: string) {
       message: '确定要删除该持仓记录吗？'
     })
     holdingStore.removeHolding(code)
+    selectedHoldingCodes.value = selectedHoldingCodes.value.filter(item => item !== code)
+    if (selectedHoldingCodes.value.length === 0) {
+      isMultiSelectMode.value = false
+    }
     showToast('已删除')
+  } catch {
+    // 用户取消
+  }
+}
+
+function clearHoldingPressTimer() {
+  if (!holdingPressTimer) return
+  clearTimeout(holdingPressTimer)
+  holdingPressTimer = null
+}
+
+function isHoldingSelected(code: string): boolean {
+  return selectedHoldingCodes.value.includes(code)
+}
+
+function enterMultiSelectMode(code: string) {
+  isMultiSelectMode.value = true
+  if (!isHoldingSelected(code)) {
+    selectedHoldingCodes.value = [...selectedHoldingCodes.value, code]
+  }
+}
+
+function exitMultiSelectMode() {
+  isMultiSelectMode.value = false
+  selectedHoldingCodes.value = []
+  holdingLongPressTriggered = false
+  clearHoldingPressTimer()
+}
+
+function toggleHoldingSelection(code: string) {
+  if (isHoldingSelected(code)) {
+    selectedHoldingCodes.value = selectedHoldingCodes.value.filter(item => item !== code)
+  } else {
+    selectedHoldingCodes.value = [...selectedHoldingCodes.value, code]
+  }
+  if (selectedHoldingCodes.value.length === 0) {
+    isMultiSelectMode.value = false
+  }
+}
+
+function toggleSelectAllHoldings() {
+  if (isAllHoldingSelected.value) {
+    exitMultiSelectMode()
+    return
+  }
+  isMultiSelectMode.value = true
+  selectedHoldingCodes.value = holdingStore.holdings.map(item => item.code)
+}
+
+function handleHoldingItemPressStart(code: string) {
+  if (isMultiSelectMode.value) return
+  clearHoldingPressTimer()
+  holdingLongPressTriggered = false
+  holdingPressTimer = setTimeout(() => {
+    holdingLongPressTriggered = true
+    enterMultiSelectMode(code)
+    showToast('已进入多选模式')
+  }, HOLDING_LONG_PRESS_MS)
+}
+
+function handleHoldingItemPressEnd() {
+  clearHoldingPressTimer()
+}
+
+function handleHoldingItemPressMove() {
+  clearHoldingPressTimer()
+}
+
+function handleHoldingItemClick(code: string) {
+  if (holdingLongPressTriggered) {
+    holdingLongPressTriggered = false
+    return
+  }
+  if (isMultiSelectMode.value) {
+    toggleHoldingSelection(code)
+    return
+  }
+  goToDetail(code)
+}
+
+async function handleDeleteSelectedHoldings() {
+  if (selectedHoldingCount.value === 0) {
+    showToast('请先选择持仓')
+    return
+  }
+
+  const deleteCount = selectedHoldingCount.value
+  try {
+    await showConfirmDialog({
+      title: '批量删除',
+      message: `确定要删除选中的 ${deleteCount} 条持仓记录吗？`
+    })
+    selectedHoldingCodes.value.forEach(code => {
+      holdingStore.removeHolding(code)
+    })
+    exitMultiSelectMode()
+    showToast(`已删除 ${deleteCount} 条持仓`)
   } catch {
     // 用户取消
   }
@@ -912,6 +1033,19 @@ function openImportPage() {
       </template>
     </van-nav-bar>
 
+    <div v-if="isMultiSelectMode" class="multi-select-toolbar">
+      <div class="multi-select-info">已选 {{ selectedHoldingCount }} 项</div>
+      <div class="multi-select-actions">
+        <van-button size="small" round plain type="primary" @click="toggleSelectAllHoldings">
+          {{ isAllHoldingSelected ? '取消全选' : '全选' }}
+        </van-button>
+        <van-button size="small" round plain type="danger" :disabled="selectedHoldingCount === 0" @click="handleDeleteSelectedHoldings">
+          删除
+        </van-button>
+        <van-button size="small" round plain @click="exitMultiSelectMode">取消</van-button>
+      </div>
+    </div>
+
     <!-- 汇总统计卡片 -->
     <div v-if="holdingStore.holdings.length > 0" class="summary-card">
       <div class="summary-row">
@@ -971,8 +1105,28 @@ function openImportPage() {
       class="holding-list-container"
     >
       <template v-if="hasHoldingListItems">
-        <van-swipe-cell v-for="holding in sortedHoldings" :key="holding.code">
-          <div class="holding-item" :class="getHoldingItemBgClass(holding.todayProfit)" @click="goToDetail(holding.code)">
+        <van-swipe-cell v-for="holding in sortedHoldings" :key="holding.code" :disabled="isMultiSelectMode">
+          <div
+            class="holding-item"
+            :class="[
+              getHoldingItemBgClass(holding.todayProfit),
+              {
+                'multi-select-mode': isMultiSelectMode,
+                selected: isHoldingSelected(holding.code)
+              }
+            ]"
+            @click="handleHoldingItemClick(holding.code)"
+            @touchstart="handleHoldingItemPressStart(holding.code)"
+            @touchend="handleHoldingItemPressEnd"
+            @touchcancel="handleHoldingItemPressEnd"
+            @touchmove="handleHoldingItemPressMove"
+            @mousedown="handleHoldingItemPressStart(holding.code)"
+            @mouseup="handleHoldingItemPressEnd"
+            @mouseleave="handleHoldingItemPressEnd"
+          >
+            <div v-if="isMultiSelectMode" class="holding-select-indicator" :class="{ selected: isHoldingSelected(holding.code) }">
+              <van-icon v-if="isHoldingSelected(holding.code)" name="success" size="12" />
+            </div>
             <div class="col-name">
               <div class="fund-name">{{ holding.name || '加载中...' }}</div>
               <div class="fund-code">{{ holding.code }}</div>
@@ -990,7 +1144,7 @@ function openImportPage() {
               >
                 待确认交易{{ getPendingTradeCountByCode(holding.code) }}笔
               </div>
-              <div class="trade-actions" @click.stop>
+              <div v-if="!isMultiSelectMode" class="trade-actions" @click.stop @touchstart.stop @touchend.stop @mousedown.stop @mouseup.stop>
                 <van-button class="trade-btn buy" size="mini" type="danger" plain @click="openTradeDialog('buy', holding.code)">买入</van-button>
                 <van-button class="trade-btn sell" size="mini" type="success" plain @click="openTradeDialog('sell', holding.code)">卖出</van-button>
                 <van-button class="trade-btn delete" size="mini" type="danger" plain @click="handleDelete(holding.code)">删除</van-button>
@@ -1554,6 +1708,29 @@ function openImportPage() {
   cursor: pointer;
 }
 
+
+.multi-select-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.multi-select-info {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.multi-select-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .pending-inline-tip {
   margin-top: 4px;
   font-size: 11px;
@@ -1640,6 +1817,36 @@ function openImportPage() {
   border-bottom: 1px solid var(--border-light);
   transition: all 0.2s;
   position: relative;
+}
+
+
+.holding-item.multi-select-mode {
+  padding-left: 52px;
+}
+
+.holding-item.selected {
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.holding-select-indicator {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong, var(--border-color));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: var(--bg-secondary);
+}
+
+.holding-select-indicator.selected {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 .holding-item.holding-bg-up {
