@@ -41,6 +41,11 @@ export interface RecognizedHoldingSnapshot {
   rawText: string
 }
 
+interface OcrRecognizePayload {
+  text: string
+  tsv?: string
+}
+
 const FUND_KEYWORDS = [
   '混合', 'ETF', '联接', '指数', '债券', '股票', '增强', 'LOF', 'QDII', '主题', '精选', '成长', '价值', '量化',
   '稳健', '纯债', '短债', '定开', '创新', '科技', '消费', '医药', '新能源', '半导体', '智选', '优选', '龙头',
@@ -174,16 +179,20 @@ export async function preloadOcrEngine(onProgress?: OcrProgressCallback): Promis
  * @param imageSource 图片来源（File 对象、URL 或 Base64）
  * @param onProgress 进度回调
  */
-export async function recognizeText(imageSource: File | string, onProgress?: OcrProgressCallback): Promise<string> {
+async function recognizePageData(
+  imageSource: File | string,
+  onProgress?: OcrProgressCallback
+): Promise<OcrRecognizePayload> {
   const worker = await getSharedWorker()
   activeProgressCallback = onProgress
   debugOcrStage('Stage 1 OCR输入图片', describeImageSource(imageSource))
 
   try {
-    const result = await worker.recognize(imageSource)
+    const result = await worker.recognize(imageSource, {}, { tsv: true })
     const pageData = result.data as typeof result.data & {
       words?: unknown[]
       lines?: unknown[]
+      tsv?: string | null
     }
     debugOcrStage('Stage 1.5 OCR原始识别结果', {
       confidence: result.data.confidence,
@@ -191,13 +200,22 @@ export async function recognizeText(imageSource: File | string, onProgress?: Ocr
       rawText: result.data.text,
       wordCount: pageData.words?.length || 0,
       lineCount: pageData.lines?.length || 0,
+      tsvLength: pageData.tsv?.length || 0,
       words: pageData.words,
       lines: pageData.lines
     })
-    return result.data.text
+    return {
+      text: result.data.text,
+      tsv: pageData.tsv || undefined
+    }
   } finally {
     activeProgressCallback = undefined
   }
+}
+
+export async function recognizeText(imageSource: File | string, onProgress?: OcrProgressCallback): Promise<string> {
+  const payload = await recognizePageData(imageSource, onProgress)
+  return payload.text
 }
 
 /**
@@ -205,7 +223,7 @@ export async function recognizeText(imageSource: File | string, onProgress?: Ocr
  * [WHY] 不同平台的截图格式不同，需要灵活解析
  * [WHAT] 尝试多种模式匹配，提取基金代码、名称、金额等信息
  */
-export function parseHoldingText(text: string): RecognizedHolding[] {
+export function parseHoldingText(text: string, tsv?: string): RecognizedHolding[] {
   const holdings: RecognizedHolding[] = []
   const lines = text.split('\n').map(line => line.trim()).filter(Boolean)
   debugOcrStage('Stage 2 原始文本分行', {
@@ -299,8 +317,10 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
     holdings
   })
 
+  const layoutEnrichedHoldings = enrichHoldingsWithTsvLayout(holdings, tsv)
+
   const filteredOut: Array<{ reason: string; holding: RecognizedHolding }> = []
-  const filteredHoldings = holdings.filter(h => {
+  const filteredHoldings = layoutEnrichedHoldings.filter(h => {
     if (h.amount < 10) {
       filteredOut.push({ reason: 'amount < 10', holding: h })
       return false
@@ -323,7 +343,8 @@ export function parseHoldingText(text: string): RecognizedHolding[] {
     keptCount: filteredHoldings.length,
     removedCount: filteredOut.length,
     removed: filteredOut,
-    holdings: filteredHoldings
+    holdings: filteredHoldings,
+    layoutEnrichedHoldings
   })
   return filteredHoldings
 }
@@ -721,6 +742,179 @@ function pickHoldingProfitFromMainRow(line: string, amount: number): number | un
   return profitToken.value
 }
 
+
+type TsvWord = {
+  text: string
+  left: number
+  top: number
+  width: number
+  height: number
+  centerY: number
+}
+
+type TsvRow = {
+  top: number
+  bottom: number
+  text: string
+  words: TsvWord[]
+}
+
+type LayoutHoldingCandidate = {
+  name: string
+  amount: number
+  holdingProfit?: number
+  holdingProfitRate?: number
+}
+
+function parseTsvRows(tsv?: string): TsvRow[] {
+  if (!tsv) return []
+
+  const words = tsv
+    .trim()
+    .split('\n')
+    .slice(1)
+    .map(line => line.split('\t'))
+    .filter(parts => parts.length >= 12 && Number(parts[0]) === 5 && !!parts[11])
+    .map(parts => ({
+      text: parts[11],
+      left: Number(parts[6]),
+      top: Number(parts[7]),
+      width: Number(parts[8]),
+      height: Number(parts[9]),
+      centerY: Number(parts[7]) + Number(parts[9]) / 2
+    }))
+
+  const rows: Array<{ centerY: number; top: number; bottom: number; words: TsvWord[] }> = []
+  for (const word of words) {
+    const row = rows.find(item => Math.abs(item.centerY - word.centerY) <= Math.max(18, word.height * 0.6))
+    if (row) {
+      row.words.push(word)
+      row.centerY = (row.centerY * (row.words.length - 1) + word.centerY) / row.words.length
+      row.top = Math.min(row.top, word.top)
+      row.bottom = Math.max(row.bottom, word.top + word.height)
+    } else {
+      rows.push({
+        centerY: word.centerY,
+        top: word.top,
+        bottom: word.top + word.height,
+        words: [word]
+      })
+    }
+  }
+
+  return rows
+    .map(row => {
+      row.words.sort((a, b) => a.left - b.left)
+      return {
+        top: row.top,
+        bottom: row.bottom,
+        text: row.words.map(word => word.text).join(' '),
+        words: row.words
+      }
+    })
+    .sort((a, b) => a.top - b.top)
+}
+
+function extractNumericTokensFromRow(row: TsvRow): Array<ParsedNumericToken & { left: number }> {
+  return row.words.flatMap(word => (
+    extractNumericTokens(word.text).map(token => ({
+      ...token,
+      left: word.left + token.index
+    }))
+  ))
+}
+
+function pickAmountTokenFromRow(tokens: Array<ParsedNumericToken & { left: number }>) {
+  const amountTokens = tokens.filter(token => !token.isPercent && token.value >= 100)
+  if (amountTokens.length === 0) return undefined
+  return amountTokens.find(token => token.left >= 560 && token.left <= 900) || amountTokens[0]
+}
+
+function extractRowNameBeforeAmount(row: TsvRow, amountLeft: number): string {
+  const name = row.words
+    .filter(word => word.left + word.width <= amountLeft - 40)
+    .map(word => word.text)
+    .join('')
+  return stripNameNoiseSuffix(cleanFundName(name))
+}
+
+function pickHoldingProfitRateFromRow(row?: TsvRow, amountLeft = 0): number | undefined {
+  if (!row) return undefined
+  const tokens = extractNumericTokensFromRow(row)
+    .filter(token => token.left > amountLeft - 20 && Math.abs(token.value) <= 100)
+  if (tokens.length === 0) return undefined
+  const percentToken = [...tokens].reverse().find(token => token.isPercent)
+  if (percentToken) return percentToken.value
+  const signedToken = [...tokens].reverse().find(token => token.hasSign)
+  return signedToken?.value
+}
+
+function buildLayoutHoldingCandidates(tsv?: string): LayoutHoldingCandidate[] {
+  const rows = parseTsvRows(tsv)
+  const candidates: LayoutHoldingCandidate[] = []
+
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index]
+    const amountToken = pickAmountTokenFromRow(extractNumericTokensFromRow(row))
+    if (!amountToken) continue
+
+    let nameCandidate = extractRowNameBeforeAmount(row, amountToken.left)
+    const nextRow = rows[index + 1]
+    const nextNamePart = nextRow && nextRow.top - row.bottom <= 120
+      ? extractRowNameBeforeAmount(nextRow, amountToken.left)
+      : ''
+    if (nextNamePart && shouldJoinNameContinuation(nameCandidate, nextNamePart)) {
+      nameCandidate = `${nameCandidate}${nextNamePart}`
+    }
+    if (!looksLikeFundName(nameCandidate)) continue
+
+    candidates.push({
+      name: nameCandidate,
+      amount: amountToken.value,
+      holdingProfit: pickHoldingProfitFromMainRow(row.text, amountToken.value),
+      holdingProfitRate:
+        pickHoldingProfitRateFromRow(nextRow, amountToken.left) ??
+        pickHoldingProfitRateFromRow(row, amountToken.left)
+    })
+  }
+
+  return candidates
+}
+
+function isSameHoldingCandidateName(left: string, right: string): boolean {
+  const normalizedLeft = applyKnownNameCorrections(cleanFundName(left)).replace(/\s+/g, '')
+  const normalizedRight = applyKnownNameCorrections(cleanFundName(right)).replace(/\s+/g, '')
+  if (!normalizedLeft || !normalizedRight) return false
+  if (normalizedLeft === normalizedRight) return true
+  const prefixLength = Math.min(4, normalizedLeft.length, normalizedRight.length)
+  return (
+    normalizedLeft.includes(normalizedRight.slice(0, prefixLength)) ||
+    normalizedRight.includes(normalizedLeft.slice(0, prefixLength))
+  )
+}
+
+function enrichHoldingsWithTsvLayout(holdings: RecognizedHolding[], tsv?: string): RecognizedHolding[] {
+  const candidates = buildLayoutHoldingCandidates(tsv)
+  if (candidates.length === 0) return holdings
+
+  return holdings.map(holding => {
+    if (holding.holdingProfit !== undefined && holding.holdingProfitRate !== undefined) return holding
+
+    const candidate = candidates.find(item => (
+      Math.abs((item.amount || 0) - (holding.amount || 0)) <= 0.01 &&
+      isSameHoldingCandidateName(item.name, holding.name)
+    ))
+    if (!candidate) return holding
+
+    return {
+      ...holding,
+      holdingProfit: holding.holdingProfit ?? candidate.holdingProfit,
+      holdingProfitRate: holding.holdingProfitRate ?? candidate.holdingProfitRate,
+      confidence: Math.max(holding.confidence, 0.7)
+    }
+  })
+}
+
 /**
  * 提取带符号的小数（支持 OCR 异常格式）
  */
@@ -752,13 +946,13 @@ export async function recognizeHoldingSnapshot(
   imageSource: File | string,
   onProgress?: OcrProgressCallback
 ): Promise<RecognizedHoldingSnapshot> {
-  const text = await recognizeText(imageSource, onProgress)
-  const holdings = parseHoldingText(text)
-  const profitLabel = parseProfitLabel(text)
+  const payload = await recognizePageData(imageSource, onProgress)
+  const holdings = parseHoldingText(payload.text, payload.tsv)
+  const profitLabel = parseProfitLabel(payload.text)
   const snapshot = {
     holdings,
     profitLabel,
-    rawText: text
+    rawText: payload.text
   }
   debugOcrStage('Stage 9 OCR快照汇总', snapshot)
   return snapshot
