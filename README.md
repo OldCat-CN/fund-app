@@ -146,7 +146,7 @@ fund-app/
 4. 推送到分支 (`git push origin feature/amazing-feature`)
 5. 创建 Pull Request
 
-## 赞助于交流
+## 赞助与交流
 
 - **QQ**: 1708298587
 - **telegram**: https://t.me/fundTreasure

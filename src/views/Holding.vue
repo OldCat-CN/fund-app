@@ -1084,14 +1084,14 @@ function openImportPage() {
       <span class="col-name">基金名称</span>
       <span class="col-today sortable-header" @click="toggleHoldingSort('today')">
         <span class="header-main">
-          <span>当日收益/率</span>
+          <span>当日收益</span>
           <van-icon name="sort" class="sort-icon" :class="getSortIconClass('today')" />
         </span>
         <span class="header-date">{{ todayColumnDateLabel }}</span>
       </span>
       <span class="col-profit sortable-header" @click="toggleHoldingSort('profit')">
         <span class="header-main">
-          <span>持有收益/率</span>
+          <span>持有收益</span>
           <van-icon name="sort" class="sort-icon" :class="getSortIconClass('profit')" />
         </span>
         <span class="header-date">{{ holdingColumnDateLabel }}</span>
