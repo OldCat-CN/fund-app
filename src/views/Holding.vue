@@ -887,7 +887,11 @@ function handleSellClick(code: string, name = '') {
 }
 
 function openSyncHolding() {
-  showToast('同步持仓功能开发中')
+  openImportPage()
+}
+
+function openBatchAdjust() {
+  showToast('批量调仓功能开发中')
 }
 
 function openImportPage() {
@@ -1067,9 +1071,11 @@ function openImportPage() {
 
       <!-- 空状态 -->
       <van-empty v-else description="暂无持仓记录">
-        <van-button round type="primary" @click="openAddDialog">
-          添加持仓
-        </van-button>
+        <div class="empty-holding-actions">
+          <van-button class="holding-action-btn add" round type="primary" @click="openAddDialog">添加持仓</van-button>
+          <van-button class="holding-action-btn sync" round plain type="primary" @click="openSyncHolding">同步持仓</van-button>
+          <van-button class="holding-action-btn batch" round plain type="primary" @click="openBatchAdjust">批量调仓</van-button>
+        </div>
       </van-empty>
       
       <!-- 底部占位，避免被导航栏遮挡 -->
@@ -1787,18 +1793,35 @@ function openImportPage() {
   gap: 8px;
 }
 
-.add-holding-wrap :deep(.holding-action-btn) {
+.add-holding-wrap :deep(.holding-action-btn),
+.empty-holding-actions :deep(.holding-action-btn) {
   font-size: 13px;
   font-weight: 500;
   border-radius: 999px;
 }
 
-.add-holding-wrap :deep(.holding-action-btn.add) {
+.empty-holding-actions {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empty-holding-actions :deep(.holding-action-btn) {
+  min-width: 104px;
+}
+
+.add-holding-wrap :deep(.holding-action-btn.add),
+.empty-holding-actions :deep(.holding-action-btn.add) {
   box-shadow: 0 4px 10px rgba(25, 137, 250, 0.22);
 }
 
 .add-holding-wrap :deep(.holding-action-btn.import),
-.add-holding-wrap :deep(.holding-action-btn.sync) {
+.add-holding-wrap :deep(.holding-action-btn.sync),
+.empty-holding-actions :deep(.holding-action-btn.sync),
+.empty-holding-actions :deep(.holding-action-btn.batch) {
   background: var(--bg-tertiary);
   border-color: var(--border-color);
   color: var(--text-primary);
@@ -1911,8 +1934,10 @@ function openImportPage() {
 
 :global([data-theme="dark"] .holding-page .holding-action-btn.import.van-button),
 :global([data-theme="dark"] .holding-page .holding-action-btn.sync.van-button),
+:global([data-theme="dark"] .holding-page .holding-action-btn.batch.van-button),
 :global(:root:not([data-theme="light"]) .holding-page .holding-action-btn.import.van-button),
-:global(:root:not([data-theme="light"]) .holding-page .holding-action-btn.sync.van-button) {
+:global(:root:not([data-theme="light"]) .holding-page .holding-action-btn.sync.van-button),
+:global(:root:not([data-theme="light"]) .holding-page .holding-action-btn.batch.van-button) {
   background: #161B22 !important;
   border-color: var(--border-color) !important;
   color: var(--text-primary) !important;

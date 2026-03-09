@@ -71,7 +71,6 @@ export type OcrProgressCallback = (progress: number, status: string) => void
 let sharedWorkerPromise: Promise<Worker> | null = null
 let activeProgressCallback: OcrProgressCallback | undefined
 
-const OCR_DEBUG_PREFIX = '[OCR 调试]'
 const OCR_LANG_PATH = typeof window !== 'undefined' ? '/tessdata' : './public/tessdata'
 const OCR_CACHE_PATH = 'ocr-cache/local-tessdata-v2-chi-sim-psm6'
 const OCR_WORKER_PATH = typeof window !== 'undefined' ? '/tesseract/worker.min.js' : undefined
@@ -84,15 +83,7 @@ const OCR_PRIMARY_PARAMETERS = {
   user_defined_dpi: '300'
 }
 
-function debugOcrStage(stage: string, payload?: unknown) {
-  const label = `${OCR_DEBUG_PREFIX}[${stage}]`
-  if (payload === undefined) {
-    console.log(label)
-    return
-  }
-  console.groupCollapsed(label)
-  console.log(payload)
-  console.groupEnd()
+function debugOcrStage(_stage: string, _payload?: unknown) {
 }
 
 function describeImageSource(imageSource: File | string) {

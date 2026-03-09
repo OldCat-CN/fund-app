@@ -85,8 +85,6 @@ function clearSearchTimer(index: number) {
   searchTimers.delete(index)
 }
 
-const IMPORT_DEBUG_PREFIX = '[截图导入调试]'
-
 function summarizeHoldingForDebug(holding: Partial<EnhancedHolding>) {
   return {
     code: holding.code,
@@ -104,15 +102,7 @@ function summarizeHoldingForDebug(holding: Partial<EnhancedHolding>) {
   }
 }
 
-function logImportStage(stage: string, payload?: unknown) {
-  const label = `${IMPORT_DEBUG_PREFIX}[${stage}]`
-  if (payload === undefined) {
-    console.log(label)
-    return
-  }
-  console.groupCollapsed(label)
-  console.log(payload)
-  console.groupEnd()
+function logImportStage(_stage: string, _payload?: unknown) {
 }
 
 watch(
